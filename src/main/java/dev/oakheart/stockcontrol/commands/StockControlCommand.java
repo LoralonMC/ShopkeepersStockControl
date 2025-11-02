@@ -236,7 +236,7 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(miniMessage.deserialize("<aqua>  Remaining: <white>" + remaining));
 
             if (timeRemaining > 0) {
-                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <white>" + formatDuration(timeRemaining)));
+                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <white>" + plugin.getTradeDataManager().formatResetTime(timeRemaining)));
             } else {
                 sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <green>Ready"));
             }
@@ -300,22 +300,6 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc debug<white> - Toggle debug mode"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc cleanup<white> - Manually trigger cleanup"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc help<white> - Show this help message"));
-    }
-
-    /**
-     * Formats a duration in seconds to a human-readable string.
-     */
-    private String formatDuration(long seconds) {
-        if (seconds < 60) return seconds + "s";
-        if (seconds < 3600) return (seconds / 60) + "m " + (seconds % 60) + "s";
-        if (seconds < 86400) {
-            long hours = seconds / 3600;
-            long minutes = (seconds % 3600) / 60;
-            return hours + "h " + minutes + "m";
-        }
-        long days = seconds / 86400;
-        long hours = (seconds % 86400) / 3600;
-        return days + "d " + hours + "h";
     }
 
     @Override

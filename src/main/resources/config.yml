@@ -3,6 +3,17 @@
 # Data storage type (only 'sqlite' is currently supported)
 storage_type: sqlite
 
+# === Daily Reset Configuration ===
+# Use fixed daily reset time instead of rolling cooldowns
+# When enabled, all trades reset at the specified time each day
+# When disabled, trades use rolling cooldowns (e.g., 24 hours after use)
+use_fixed_daily_reset: false
+
+# Daily reset time in 24-hour format (HH:mm) - server timezone
+# Examples: "00:00" (midnight), "06:00" (6 AM), "12:00" (noon), "18:00" (6 PM)
+# Only applies when use_fixed_daily_reset is true
+daily_reset_time: "00:00"
+
 # Cooldown check frequency (in seconds)
 # How often to check for expired cooldowns and clean up data
 cooldown_check_interval: 60

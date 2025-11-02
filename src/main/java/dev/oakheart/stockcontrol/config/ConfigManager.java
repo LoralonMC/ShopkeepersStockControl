@@ -236,6 +236,14 @@ public class ConfigManager {
             warnings.add("storage_type '" + storageType + "' is not supported. Only 'sqlite' is currently supported.");
         }
 
+        // Validate daily reset time format
+        if (isFixedDailyReset()) {
+            String resetTime = getDailyResetTime();
+            if (!resetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
+                warnings.add("daily_reset_time must be in HH:mm format (00:00 to 23:59). Current: '" + resetTime + "'");
+            }
+        }
+
         return warnings;
     }
 
@@ -258,6 +266,14 @@ public class ConfigManager {
 
     public boolean isDebugMode() {
         return config.getBoolean("debug", false);
+    }
+
+    public boolean isFixedDailyReset() {
+        return config.getBoolean("use_fixed_daily_reset", false);
+    }
+
+    public String getDailyResetTime() {
+        return config.getString("daily_reset_time", "00:00");
     }
 
     public String getMessage(String key) {

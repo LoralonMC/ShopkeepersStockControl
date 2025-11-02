@@ -172,6 +172,64 @@ public class TradeDataManager {
     }
 
     /**
+     * Formats the reset time for display to players.
+     * Returns either a countdown or a fixed time depending on configuration.
+     *
+     * @param timeRemaining Time remaining in seconds
+     * @return Formatted time string (e.g., "23h 45m" or "Resets at 00:00")
+     */
+    public String formatResetTime(long timeRemaining) {
+        if (plugin.getConfigManager().isFixedDailyReset()) {
+            String resetTime = plugin.getConfigManager().getDailyResetTime();
+            return "Resets at " + resetTime;
+        } else {
+            // Use countdown format
+            return formatDuration(timeRemaining);
+        }
+    }
+
+    /**
+     * Formats a duration in seconds to a human-readable string.
+     *
+     * @param seconds Duration in seconds
+     * @return Formatted string (e.g., "23h 45m", "6d 12h")
+     */
+    private String formatDuration(long seconds) {
+        if (seconds < 60) return seconds + "s";
+        if (seconds < 3600) return (seconds / 60) + "m " + (seconds % 60) + "s";
+        if (seconds < 86400) {
+            long hours = seconds / 3600;
+            long minutes = (seconds % 3600) / 60;
+            return hours + "h " + minutes + "m";
+        }
+        long days = seconds / 86400;
+        long hours = (seconds % 86400) / 3600;
+        return days + "d " + hours + "h";
+    }
+
+    /**
+     * Calculates the next reset time in epoch seconds based on configured daily reset time.
+     *
+     * @return Epoch seconds for the next reset time (today or tomorrow)
+     */
+    private long getNextDailyResetTime() {
+        String resetTimeStr = plugin.getConfigManager().getDailyResetTime();
+        String[] parts = resetTimeStr.split(":");
+        int hour = Integer.parseInt(parts[0]);
+        int minute = Integer.parseInt(parts[1]);
+
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+        java.time.ZonedDateTime todayReset = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0);
+
+        // If today's reset time has already passed, use tomorrow's reset time
+        if (now.isAfter(todayReset)) {
+            todayReset = todayReset.plusDays(1);
+        }
+
+        return todayReset.toEpochSecond();
+    }
+
+    /**
      * Checks if cooldown has expired for a specific trade.
      *
      * @param playerId The player's UUID
@@ -187,9 +245,19 @@ public class TradeDataManager {
         }
 
         long now = System.currentTimeMillis() / 1000;
-        long elapsed = now - data.getLastResetEpoch();
 
-        return elapsed >= data.getCooldownSeconds();
+        // Use fixed daily reset if enabled
+        if (plugin.getConfigManager().isFixedDailyReset()) {
+            // Check if the last trade was before the most recent reset time
+            long nextResetTime = getNextDailyResetTime();
+            long lastResetTime = nextResetTime - 86400; // Yesterday's reset time
+
+            return data.getLastResetEpoch() < lastResetTime;
+        } else {
+            // Use rolling cooldown
+            long elapsed = now - data.getLastResetEpoch();
+            return elapsed >= data.getCooldownSeconds();
+        }
     }
 
     /**
@@ -208,10 +276,18 @@ public class TradeDataManager {
         }
 
         long now = System.currentTimeMillis() / 1000;
-        long elapsed = now - data.getLastResetEpoch();
-        long remaining = data.getCooldownSeconds() - elapsed;
 
-        return Math.max(0, remaining);
+        // Use fixed daily reset if enabled
+        if (plugin.getConfigManager().isFixedDailyReset()) {
+            long nextResetTime = getNextDailyResetTime();
+            long remaining = nextResetTime - now;
+            return Math.max(0, remaining);
+        } else {
+            // Use rolling cooldown
+            long elapsed = now - data.getLastResetEpoch();
+            long remaining = data.getCooldownSeconds() - elapsed;
+            return Math.max(0, remaining);
+        }
     }
 
     /**

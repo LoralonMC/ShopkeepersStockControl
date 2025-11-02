@@ -123,13 +123,13 @@ public class ShopkeepersListener implements Listener {
             long timeRemaining = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             String message = plugin.getConfigManager().getMessage(Messages.TRADE_LIMIT_REACHED);
             if (message != null && !message.isBlank()) {
-                message = message.replace("%time_remaining%", formatDuration(timeRemaining));
+                message = message.replace("%time_remaining%", tradeDataManager.formatResetTime(timeRemaining));
                 player.sendMessage(miniMessage.deserialize(message));
             }
 
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("Blocked trade for " + player.getName() +
-                        " - limit reached (cooldown: " + formatDuration(timeRemaining) + ")");
+                        " - limit reached (cooldown: " + tradeDataManager.formatResetTime(timeRemaining) + ")");
             }
             return;
         }
@@ -149,7 +149,7 @@ public class ShopkeepersListener implements Listener {
             long timeUntilReset = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             String message = plugin.getConfigManager().getMessage(Messages.COOLDOWN_ACTIVE);
             if (message != null && !message.isBlank()) {
-                message = message.replace("%time_remaining%", formatDuration(timeUntilReset));
+                message = message.replace("%time_remaining%", tradeDataManager.formatResetTime(timeUntilReset));
                 player.sendMessage(miniMessage.deserialize(message));
             }
         } else {
@@ -352,22 +352,4 @@ public class ShopkeepersListener implements Listener {
         return true;
     }
 
-    /**
-     * Formats a duration in seconds to a human-readable string.
-     *
-     * @param seconds Duration in seconds
-     * @return Formatted string (e.g., "23h 45m", "6d 12h")
-     */
-    private String formatDuration(long seconds) {
-        if (seconds < 60) return seconds + "s";
-        if (seconds < 3600) return (seconds / 60) + "m " + (seconds % 60) + "s";
-        if (seconds < 86400) {
-            long hours = seconds / 3600;
-            long minutes = (seconds % 3600) / 60;
-            return hours + "h " + minutes + "m";
-        }
-        long days = seconds / 86400;
-        long hours = (seconds % 86400) / 3600;
-        return days + "d " + hours + "h";
-    }
 }

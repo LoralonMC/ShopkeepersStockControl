@@ -7,14 +7,14 @@ A powerful Paper plugin that adds **per-player trade limits** to [Shopkeepers](h
 
 ## Features
 
-✨ **Per-Player Trade Limits** - Each player has their own independent trade limits
-⏰ **Configurable Cooldowns** - Set different cooldown periods for each trade (hours, days, weeks)
-📊 **Real-Time Stock Display** - Players see their remaining trades directly in the villager UI
-🎯 **Slot-Based Tracking** - Track specific trades in each Shopkeeper independently
-💾 **SQLite Database** - Persistent data storage with automatic backups
-🔧 **Easy Configuration** - YAML-based configuration with helpful comments
-🎨 **MiniMessage Support** - Modern text formatting with gradients and colors
-📈 **bStats Metrics** - Anonymous usage statistics for development priorities
+- ✨ **Per-Player Trade Limits** - Each player has their own independent trade limits
+- ⏰ **Configurable Cooldowns** - Set different cooldown periods for each trade (hours, days, weeks)
+- 📊 **Real-Time Stock Display** - Players see their remaining trades directly in the villager UI
+- 🎯 **Slot-Based Tracking** - Track specific trades in each Shopkeeper independently
+- 💾 **SQLite Database** - Persistent data storage with automatic backups
+- 🔧 **Easy Configuration** - YAML-based configuration with helpful comments
+- 🎨 **MiniMessage Support** - Modern text formatting with gradients and colors
+- 📈 **bStats Metrics** - Anonymous usage statistics for development priorities
 
 ## Screenshots
 
