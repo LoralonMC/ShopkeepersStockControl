@@ -172,20 +172,16 @@ public class TradeDataManager {
     }
 
     /**
-     * Formats the reset time for display to players.
-     * Returns either a countdown or a fixed time depending on configuration.
+     * Gets the formatted reset time string for display.
+     * Returns " - Resets at HH:mm" if using fixed daily reset, or empty string for rolling cooldowns.
      *
-     * @param timeRemaining Time remaining in seconds
-     * @return Formatted time string (e.g., "23h 45m" or "Resets at 00:00")
+     * @return Formatted reset time string or empty string
      */
-    public String formatResetTime(long timeRemaining) {
+    public String getResetTimeString() {
         if (plugin.getConfigManager().isFixedDailyReset()) {
-            String resetTime = plugin.getConfigManager().getDailyResetTime();
-            return "Resets at " + resetTime;
-        } else {
-            // Use countdown format
-            return formatDuration(timeRemaining);
+            return " - Resets at " + plugin.getConfigManager().getDailyResetTime();
         }
+        return "";
     }
 
     /**
@@ -194,7 +190,7 @@ public class TradeDataManager {
      * @param seconds Duration in seconds
      * @return Formatted string (e.g., "23h 45m", "6d 12h")
      */
-    private String formatDuration(long seconds) {
+    public String formatDuration(long seconds) {
         if (seconds < 60) return seconds + "s";
         if (seconds < 3600) return (seconds / 60) + "m " + (seconds % 60) + "s";
         if (seconds < 86400) {

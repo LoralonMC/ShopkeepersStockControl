@@ -236,7 +236,9 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(miniMessage.deserialize("<aqua>  Remaining: <white>" + remaining));
 
             if (timeRemaining > 0) {
-                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <white>" + plugin.getTradeDataManager().formatResetTime(timeRemaining)));
+                String resetInfo = plugin.getTradeDataManager().formatDuration(timeRemaining) +
+                                   plugin.getTradeDataManager().getResetTimeString();
+                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <white>" + resetInfo));
             } else {
                 sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <green>Ready"));
             }

@@ -123,13 +123,14 @@ public class ShopkeepersListener implements Listener {
             long timeRemaining = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             String message = plugin.getConfigManager().getMessage(Messages.TRADE_LIMIT_REACHED);
             if (message != null && !message.isBlank()) {
-                message = message.replace("%time_remaining%", tradeDataManager.formatResetTime(timeRemaining));
+                message = message.replace("%time_remaining%", tradeDataManager.formatDuration(timeRemaining))
+                                 .replace("%reset_time%", tradeDataManager.getResetTimeString());
                 player.sendMessage(miniMessage.deserialize(message));
             }
 
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("Blocked trade for " + player.getName() +
-                        " - limit reached (cooldown: " + tradeDataManager.formatResetTime(timeRemaining) + ")");
+                        " - limit reached (cooldown: " + tradeDataManager.formatDuration(timeRemaining) + ")");
             }
             return;
         }
@@ -149,7 +150,8 @@ public class ShopkeepersListener implements Listener {
             long timeUntilReset = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             String message = plugin.getConfigManager().getMessage(Messages.COOLDOWN_ACTIVE);
             if (message != null && !message.isBlank()) {
-                message = message.replace("%time_remaining%", tradeDataManager.formatResetTime(timeUntilReset));
+                message = message.replace("%time_remaining%", tradeDataManager.formatDuration(timeUntilReset))
+                                 .replace("%reset_time%", tradeDataManager.getResetTimeString());
                 player.sendMessage(miniMessage.deserialize(message));
             }
         } else {
