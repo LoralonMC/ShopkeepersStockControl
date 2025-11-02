@@ -101,7 +101,6 @@ processResources {
 // Shadow plugin configuration for proper dependency relocation
 shadowJar {
     archiveBaseName.set('ShopkeepersStockControl')
-    archiveVersion.set('')
     archiveClassifier.set('')
 
     // Relocate bStats to avoid conflicts (required by bStats)
