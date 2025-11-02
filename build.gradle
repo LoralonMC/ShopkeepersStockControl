@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    //id 'com.github.johnrengelman.shadow' version '8.1.1'  // Disabled due to Windows file locking
+    id 'io.github.goooler.shadow' version '8.1.8'  // Updated Shadow fork with Java 21 support
     id 'xyz.jpenilla.run-paper' version '2.3.1'
 }
 
@@ -98,19 +98,17 @@ processResources {
     }
 }
 
-// Custom fat jar task (avoids Shadow plugin's Windows file locking issues)
-task fatJar(type: Jar) {
+// Shadow plugin configuration for proper dependency relocation
+shadowJar {
     archiveBaseName.set('ShopkeepersStockControl')
     archiveVersion.set('')
     archiveClassifier.set('')
 
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // Relocate bStats to avoid conflicts (required by bStats)
+    relocate 'org.bstats', 'dev.oakheart.stockcontrol.bstats'
 
-    from {
-        configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
-    }
-
-    from sourceSets.main.output
+    // Relocate SQLite to avoid conflicts with other plugins
+    relocate 'org.sqlite', 'dev.oakheart.stockcontrol.sqlite'
 
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
@@ -118,4 +116,4 @@ task fatJar(type: Jar) {
     exclude 'META-INF/DEPENDENCIES'
 }
 
-build.dependsOn fatJar
+build.dependsOn shadowJar
