@@ -180,6 +180,9 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
             }
         }
 
+        // Flush any pending writes for this player to ensure we get the latest data
+        plugin.getTradeDataManager().flushPlayerData(playerId);
+
         List<PlayerTradeData> playerTrades = plugin.getTradeDataManager().getPlayerTrades(playerId);
 
         if (playerTrades.isEmpty()) {

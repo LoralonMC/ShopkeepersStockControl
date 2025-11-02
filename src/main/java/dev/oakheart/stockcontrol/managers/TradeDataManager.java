@@ -409,9 +409,12 @@ public class TradeDataManager {
     }
 
     /**
-     * Flushes a specific player's dirty data.
+     * Flushes a specific player's dirty data to ensure database is up-to-date.
+     * Used by commands that need to read the latest data.
+     *
+     * @param playerId The player's UUID
      */
-    private void flushPlayerData(UUID playerId) {
+    public void flushPlayerData(UUID playerId) {
         String prefix = playerId.toString() + ":";
         Set<String> playerDirtyKeys = new HashSet<>();
 
