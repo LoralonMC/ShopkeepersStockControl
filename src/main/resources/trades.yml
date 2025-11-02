@@ -1,0 +1,119 @@
+# Trade limits per Shopkeepers shop
+# IMPORTANT: Use stable trade keys (not numeric indices)
+# This allows you to reorder trades without breaking player data
+#
+# HOW TO FIND SHOPKEEPER IDs:
+# 1. Look in plugins/Shopkeepers/saves.yml for your shopkeeper's unique ID
+# 2. Or use /shopkeeper for the shopkeeper you want to track
+# 3. The ID will be a UUID like: e8f4a3c2-1234-5678-9abc-def012345678
+#
+# Format:
+# shops:
+#   <shopkeeper_uuid>:  # Use the actual Shopkeeper UUID here
+#     name: "Display Name"  # Optional: Friendly name shown in /ssc check (defaults to shopkeeper_id)
+#     enabled: true
+#     respect_shop_stock: false  # true = respect Shopkeepers' finite stock, false = admin shops (infinite)
+#     trades:
+#       <stable_trade_key>:  # Create your own stable identifiers (e.g., "diamond_trade")
+#         slot: <number>      # REQUIRED: Position in villager UI (0 = first trade, 1 = second, etc.)
+#         max_trades: <number>  # REQUIRED: How many times a player can do this trade
+#         cooldown: <seconds>   # REQUIRED: Cooldown duration (86400 = 24 hours, 604800 = 7 days)
+
+# EXAMPLE configurations (replace these with your actual Shopkeeper UUIDs!)
+# These are just examples to show the format - they won't work without real IDs
+shops:
+
+  # Replace "miner" with your actual Shopkeeper UUID
+  miner:
+    name: "Miner"
+    enabled: true
+    respect_shop_stock: false  # Admin shop with infinite stock
+    trades:
+      diamond_trade:
+        slot: 0
+        max_trades: 4
+        cooldown: 86400  # 24 hours
+      netherite_scrap_trade:
+        slot: 1
+        max_trades: 1
+        cooldown: 86400  # 24 hours
+      gold_ingot_trade:
+        slot: 2
+        max_trades: 4
+        cooldown: 86400  # 24 hours
+
+  # Replace "lumberjack" with your actual Shopkeeper UUID
+  lumberjack:
+    name: "Lumberjack"
+    enabled: true
+    respect_shop_stock: false
+    trades:
+      oak_log_trade:
+        slot: 0
+        max_trades: 2
+        cooldown: 86400  # 24 hours
+      spruce_log_trade:
+        slot: 1
+        max_trades: 2
+        cooldown: 86400  # 24 hours
+      birch_log_trade:
+        slot: 2
+        max_trades: 2
+        cooldown: 86400  # 24 hours
+
+  # Replace "farmer" with your actual Shopkeeper UUID
+  farmer:
+    name: "Farmer"
+    enabled: true
+    respect_shop_stock: false
+    trades:
+      honey_bottle_trade:
+        slot: 0
+        max_trades: 2
+        cooldown: 86400  # 24 hours
+      wheat_trade:
+        slot: 1
+        max_trades: 5
+        cooldown: 86400  # 24 hours
+      carrot_trade:
+        slot: 2
+        max_trades: 5
+        cooldown: 86400  # 24 hours
+
+  # Replace "alchemist" with your actual Shopkeeper UUID
+  alchemist:
+    name: "Alchemist"
+    enabled: true
+    respect_shop_stock: false
+    trades:
+      wither_skull_trade:
+        slot: 0
+        max_trades: 3
+        cooldown: 86400  # 24 hours
+      dragon_breath_trade:
+        slot: 1
+        max_trades: 2
+        cooldown: 86400  # 24 hours
+      phantom_membrane_trade:
+        slot: 2
+        max_trades: 4
+        cooldown: 86400  # 24 hours
+
+  # Replace "fisherman" with your actual Shopkeeper UUID
+  fisherman:
+    name: "Fisherman"
+    enabled: true
+    respect_shop_stock: false
+    trades:
+      heart_of_sea_trade:
+        slot: 0
+        max_trades: 1
+        cooldown: 604800  # 7 days (example of longer cooldown)
+      nautilus_shell_trade:
+        slot: 1
+        max_trades: 2
+        cooldown: 86400  # 24 hours
+      cod_trade:
+        slot: 2
+        max_trades: 10
+        cooldown: 86400  # 24 hours

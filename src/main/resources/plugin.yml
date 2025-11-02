@@ -1,0 +1,26 @@
+name: ShopkeepersStockControl
+version: '${version}'
+main: dev.oakheart.stockcontrol.ShopkeepersStockControl
+api-version: '1.21'
+authors: [ Loralon ]
+description: A Shopkeepers addon that enables per-player trade limits with accurate stock display
+website: https://github.com/LoralonMC/ShopkeepersStockControl
+
+depend: [ Shopkeepers ]
+softdepend: [ PacketEvents ]
+
+commands:
+  ssc:
+    description: ShopkeepersStockControl main command
+    usage: /ssc <reload|reset|check|debug|cleanup|help>
+    aliases: [ shopkeepersstock, stockcontrol ]
+    permission: shopkeepersstock.admin
+
+permissions:
+  shopkeepersstock.use:
+    description: Use the plugin
+    default: true
+
+  shopkeepersstock.admin:
+    description: Admin access to all SSC commands
+    default: op
