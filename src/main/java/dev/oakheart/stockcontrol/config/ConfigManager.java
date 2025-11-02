@@ -137,8 +137,10 @@ public class ConfigManager {
                     int maxTrades = tradeSection.getInt("max_trades", 1);
                     int cooldown = tradeSection.getInt("cooldown", 86400);
 
-                    plugin.getLogger().info("Loading trade '" + tradeKey + "' for shop " + shopId +
-                            ": slot=" + slot + ", max_trades=" + maxTrades + ", cooldown=" + cooldown);
+                    if (isDebugMode()) {
+                        plugin.getLogger().info("Loading trade '" + tradeKey + "' for shop " + shopId +
+                                ": slot=" + slot + ", max_trades=" + maxTrades + ", cooldown=" + cooldown);
+                    }
 
                     TradeConfig tradeConfig = new TradeConfig(tradeKey, slot, maxTrades, cooldown);
                     trades.put(tradeKey, tradeConfig);
