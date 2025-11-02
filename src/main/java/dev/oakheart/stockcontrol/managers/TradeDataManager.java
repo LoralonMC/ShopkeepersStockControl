@@ -172,14 +172,14 @@ public class TradeDataManager {
     }
 
     /**
-     * Gets the formatted reset time string for display.
-     * Returns " - Resets at HH:mm" if using fixed daily reset, or empty string for rolling cooldowns.
+     * Gets the reset time value for the placeholder.
+     * Returns the time (e.g., "00:00") if using fixed daily reset, or empty string for rolling cooldowns.
      *
-     * @return Formatted reset time string or empty string
+     * @return Reset time string or empty string
      */
     public String getResetTimeString() {
         if (plugin.getConfigManager().isFixedDailyReset()) {
-            return " - Resets at " + plugin.getConfigManager().getDailyResetTime();
+            return plugin.getConfigManager().getDailyResetTime();
         }
         return "";
     }
