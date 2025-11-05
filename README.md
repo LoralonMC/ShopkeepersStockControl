@@ -204,18 +204,12 @@ The plugin uses **stable trade keys** (not slot numbers) to track trades. This m
 ```bash
 git clone https://github.com/LoralonMC/ShopkeepersStockControl.git
 cd ShopkeepersStockControl
-
-# Download Shopkeepers dependency (required for compilation)
-# Download Shopkeepers-2.24.0.jar from:
-# https://github.com/Shopkeepers/Shopkeepers/releases/tag/v2.24.0
-# Place it in the libs/ directory
-
 ./gradlew clean build
 ```
 
-JAR will be in `build/libs/ShopkeepersStockControl.jar`
+JAR will be in `build/libs/ShopkeepersStockControl-1.0.0-all.jar`
 
-**Note**: The Shopkeepers JAR is only needed for compilation. At runtime, Shopkeepers must be installed as a separate plugin on your server.
+**Note**: All dependencies (including Shopkeepers API) are automatically downloaded via Maven during the build. At runtime, Shopkeepers and PacketEvents must be installed as separate plugins on your server.
 
 ### Project Structure
 
