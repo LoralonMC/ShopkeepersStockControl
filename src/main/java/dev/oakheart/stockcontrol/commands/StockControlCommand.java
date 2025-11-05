@@ -221,7 +221,8 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
 
         for (PlayerTradeData data : playerTrades) {
             int remaining = plugin.getTradeDataManager().getRemainingTrades(playerId, data.getShopId(), data.getTradeKey());
-            long timeRemaining = plugin.getTradeDataManager().getTimeUntilReset(playerId, data.getShopId(), data.getTradeKey());
+            boolean cooldownExpired = plugin.getTradeDataManager().hasCooldownExpired(playerId, data.getShopId(), data.getTradeKey());
+            long timeRemaining = cooldownExpired ? 0 : plugin.getTradeDataManager().getTimeUntilReset(playerId, data.getShopId(), data.getTradeKey());
 
             ShopConfig shop = plugin.getConfigManager().getShop(data.getShopId());
             int maxTrades = shop != null && shop.getTrade(data.getTradeKey()) != null
@@ -230,9 +231,12 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
 
             String shopName = shop != null ? shop.getName() : data.getShopId();
 
+            // Show accurate "Used" count - if cooldown expired, it's effectively 0
+            int usedCount = cooldownExpired ? 0 : data.getTradesUsed();
+
             sender.sendMessage(miniMessage.deserialize("<aqua>Shop: <white>" + shopName));
             sender.sendMessage(miniMessage.deserialize("<aqua>  Trade: <white>" + data.getTradeKey()));
-            sender.sendMessage(miniMessage.deserialize("<aqua>  Used: <white>" + data.getTradesUsed() + "/" + maxTrades));
+            sender.sendMessage(miniMessage.deserialize("<aqua>  Used: <white>" + usedCount + "/" + maxTrades));
             sender.sendMessage(miniMessage.deserialize("<aqua>  Remaining: <white>" + remaining));
 
             if (timeRemaining > 0) {
