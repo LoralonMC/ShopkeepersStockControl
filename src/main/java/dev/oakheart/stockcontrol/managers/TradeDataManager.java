@@ -85,22 +85,35 @@ public class TradeDataManager {
         }
 
         long now = System.currentTimeMillis() / 1000; // Current epoch seconds
-        long elapsed = now - data.getLastResetEpoch();
 
-        // Clamp negative elapsed (clock jumped backwards)
-        if (elapsed < 0) {
-            elapsed = 0;
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().warning("Clock jumped backwards for player " + playerId);
+        // Use fixed daily reset if enabled
+        if (plugin.getConfigManager().isFixedDailyReset()) {
+            // Check if we've passed the most recent reset time
+            if (hasCooldownExpired(playerId, shopId, tradeKey)) {
+                data.setTradesUsed(0);
+                data.setLastResetEpoch(now);
+                markDirty(data.getCacheKey());
+                return true;
             }
-        }
+        } else {
+            // Use rolling cooldown logic
+            long elapsed = now - data.getLastResetEpoch();
 
-        // If cooldown expired, reset trades
-        if (elapsed >= data.getCooldownSeconds()) {
-            data.setTradesUsed(0);
-            data.setLastResetEpoch(now);
-            markDirty(data.getCacheKey());
-            return true;
+            // Clamp negative elapsed (clock jumped backwards)
+            if (elapsed < 0) {
+                elapsed = 0;
+                if (plugin.getConfigManager().isDebugMode()) {
+                    plugin.getLogger().warning("Clock jumped backwards for player " + playerId);
+                }
+            }
+
+            // If cooldown expired, reset trades
+            if (elapsed >= data.getCooldownSeconds()) {
+                data.setTradesUsed(0);
+                data.setLastResetEpoch(now);
+                markDirty(data.getCacheKey());
+                return true;
+            }
         }
 
         // Check if under limit
@@ -124,16 +137,8 @@ public class TradeDataManager {
             return getTradeLimit(shopId, tradeKey);
         }
 
-        long now = System.currentTimeMillis() / 1000;
-        long elapsed = now - data.getLastResetEpoch();
-
-        // Clamp negative elapsed
-        if (elapsed < 0) {
-            elapsed = 0;
-        }
-
         // If cooldown expired, return full limit
-        if (elapsed >= data.getCooldownSeconds()) {
+        if (hasCooldownExpired(playerId, shopId, tradeKey)) {
             return getTradeLimit(shopId, tradeKey);
         }
 
@@ -360,16 +365,15 @@ public class TradeDataManager {
      * @return Number of entries cleaned up
      */
     public int cleanupExpiredCooldowns() {
-        long now = System.currentTimeMillis() / 1000;
         List<String> toRemove = new ArrayList<>();
 
         // Find expired entries
         for (Map.Entry<String, PlayerTradeData> entry : tradeCache.entrySet()) {
             PlayerTradeData data = entry.getValue();
-            long elapsed = now - data.getLastResetEpoch();
 
             // If cooldown has expired and the trade has been used
-            if (elapsed >= data.getCooldownSeconds() && data.getTradesUsed() > 0) {
+            if (hasCooldownExpired(data.getPlayerId(), data.getShopId(), data.getTradeKey())
+                    && data.getTradesUsed() > 0) {
                 toRemove.add(entry.getKey());
             }
         }

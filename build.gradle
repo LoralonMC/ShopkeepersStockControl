@@ -44,14 +44,20 @@ repositories {
         name = 'CodeMC'
         url = 'https://repo.codemc.io/repository/maven-public/'
     }
+
+    // Shopkeepers API
+    maven {
+        name = 'shopkeepers-repo'
+        url = 'https://raw.githubusercontent.com/Shopkeepers/Repository/main/releases/'
+    }
 }
 
 dependencies {
     // Paper API (Paper-only, not Spigot compatible)
     compileOnly 'io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT'
 
-    // Shopkeepers API (local JAR - see README for download instructions)
-    compileOnly files('libs/Shopkeepers-2.24.0.jar')
+    // Shopkeepers API
+    compileOnly 'com.nisovin.shopkeepers:ShopkeepersAPI:2.24.0'
 
     // PacketEvents (use server's version instead of bundling)
     compileOnly 'com.github.retrooper:packetevents-spigot:2.10.0'
