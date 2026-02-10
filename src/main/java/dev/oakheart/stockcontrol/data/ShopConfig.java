@@ -12,6 +12,9 @@ public class ShopConfig {
     private final String name;  // Display name for the shop
     private final boolean enabled;
     private final boolean respectShopStock;
+    private final CooldownMode cooldownMode;
+    private final String resetTime;   // HH:mm for daily/weekly modes
+    private final String resetDay;    // Day of week for weekly mode (e.g., "MONDAY")
     private final Map<String, TradeConfig> trades;  // Key: tradeKey, Value: TradeConfig
     private final Map<Integer, TradeConfig> tradesBySlot;  // Cached slot-to-trade mapping
 
@@ -22,13 +25,21 @@ public class ShopConfig {
      * @param name              Display name for the shop
      * @param enabled           Whether this shop is enabled for tracking
      * @param respectShopStock  Whether to respect Shopkeepers' finite stock
+     * @param cooldownMode      The cooldown reset mode (daily, weekly, or rolling)
+     * @param resetTime         Reset time in HH:mm format (for daily/weekly modes)
+     * @param resetDay          Day of week for weekly resets (e.g., "MONDAY")
      * @param trades            Map of trade configurations
      */
-    public ShopConfig(String shopId, String name, boolean enabled, boolean respectShopStock, Map<String, TradeConfig> trades) {
+    public ShopConfig(String shopId, String name, boolean enabled, boolean respectShopStock,
+                      CooldownMode cooldownMode, String resetTime, String resetDay,
+                      Map<String, TradeConfig> trades) {
         this.shopId = shopId;
         this.name = name != null && !name.isEmpty() ? name : shopId;  // Fallback to shopId if no name
         this.enabled = enabled;
         this.respectShopStock = respectShopStock;
+        this.cooldownMode = cooldownMode;
+        this.resetTime = resetTime;
+        this.resetDay = resetDay;
         this.trades = new HashMap<>(trades);
 
         // Pre-compute slot map for fast lookups during packet modification
@@ -53,6 +64,18 @@ public class ShopConfig {
 
     public boolean shouldRespectShopStock() {
         return respectShopStock;
+    }
+
+    public CooldownMode getCooldownMode() {
+        return cooldownMode;
+    }
+
+    public String getResetTime() {
+        return resetTime;
+    }
+
+    public String getResetDay() {
+        return resetDay;
     }
 
     public Map<String, TradeConfig> getTrades() {

@@ -1,6 +1,7 @@
 package dev.oakheart.stockcontrol.managers;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
+import dev.oakheart.stockcontrol.data.CooldownMode;
 import dev.oakheart.stockcontrol.data.DataStore;
 import dev.oakheart.stockcontrol.data.PlayerTradeData;
 import dev.oakheart.stockcontrol.data.ShopConfig;
@@ -8,6 +9,9 @@ import dev.oakheart.stockcontrol.data.TradeConfig;
 import org.bukkit.Bukkit;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.time.DayOfWeek;
+import java.time.ZonedDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -85,35 +89,42 @@ public class TradeDataManager {
         }
 
         long now = System.currentTimeMillis() / 1000; // Current epoch seconds
+        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
+        CooldownMode mode = tradeConfig != null ? tradeConfig.getCooldownMode() : CooldownMode.ROLLING;
 
-        // Use fixed daily reset if enabled
-        if (plugin.getConfigManager().isFixedDailyReset()) {
-            // Check if we've passed the most recent reset time
-            if (hasCooldownExpired(playerId, shopId, tradeKey)) {
-                data.setTradesUsed(0);
-                data.setLastResetEpoch(now);
-                markDirty(data.getCacheKey());
-                return true;
-            }
-        } else {
-            // Use rolling cooldown logic
-            long elapsed = now - data.getLastResetEpoch();
-
-            // Clamp negative elapsed (clock jumped backwards)
-            if (elapsed < 0) {
-                elapsed = 0;
-                if (plugin.getConfigManager().isDebugMode()) {
-                    plugin.getLogger().warning("Clock jumped backwards for player " + playerId);
+        switch (mode) {
+            case DAILY:
+            case WEEKLY:
+                // Check if we've passed the most recent reset time
+                if (hasCooldownExpired(playerId, shopId, tradeKey)) {
+                    data.setTradesUsed(0);
+                    data.setLastResetEpoch(now);
+                    markDirty(data.getCacheKey());
+                    return true;
                 }
-            }
+                break;
 
-            // If cooldown expired, reset trades
-            if (elapsed >= data.getCooldownSeconds()) {
-                data.setTradesUsed(0);
-                data.setLastResetEpoch(now);
-                markDirty(data.getCacheKey());
-                return true;
-            }
+            case ROLLING:
+            default:
+                // Use rolling cooldown logic
+                long elapsed = now - data.getLastResetEpoch();
+
+                // Clamp negative elapsed (clock jumped backwards)
+                if (elapsed < 0) {
+                    elapsed = 0;
+                    if (plugin.getConfigManager().isDebugMode()) {
+                        plugin.getLogger().warning("Clock jumped backwards for player " + playerId);
+                    }
+                }
+
+                // If cooldown expired, reset trades
+                if (elapsed >= data.getCooldownSeconds()) {
+                    data.setTradesUsed(0);
+                    data.setLastResetEpoch(now);
+                    markDirty(data.getCacheKey());
+                    return true;
+                }
+                break;
         }
 
         // Check if under limit
@@ -157,13 +168,10 @@ public class TradeDataManager {
      */
     public void recordTrade(UUID playerId, String shopId, String tradeKey) {
         PlayerTradeData data = getOrCreateTradeData(playerId, shopId, tradeKey);
-        long now = System.currentTimeMillis() / 1000;
 
-        // Increment usage
+        // Increment usage. lastResetEpoch stays at creation time (first trade) — the rolling
+        // cooldown window always starts from the first trade, not from when the limit is hit.
         data.setTradesUsed(data.getTradesUsed() + 1);
-
-        // lastResetEpoch stays at creation time (first trade) — the rolling cooldown
-        // window always starts from the first trade, not from when the limit is hit.
 
         markDirty(data.getCacheKey());
 
@@ -175,16 +183,28 @@ public class TradeDataManager {
     }
 
     /**
-     * Gets the reset time value for the placeholder.
-     * Returns the time (e.g., "00:00") if using fixed daily reset, or empty string for rolling cooldowns.
+     * Gets the reset time display string for a specific trade.
+     * Returns the configured reset time for daily/weekly modes, or empty string for rolling.
      *
-     * @return Reset time string or empty string
+     * @param shopId   The shop identifier
+     * @param tradeKey The trade key
+     * @return Reset time string (e.g., "00:00", "Monday 00:00") or empty string for rolling
      */
-    public String getResetTimeString() {
-        if (plugin.getConfigManager().isFixedDailyReset()) {
-            return plugin.getConfigManager().getDailyResetTime();
+    public String getResetTimeString(String shopId, String tradeKey) {
+        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
+        if (tradeConfig == null) return "";
+
+        switch (tradeConfig.getCooldownMode()) {
+            case DAILY:
+                return tradeConfig.getResetTime();
+            case WEEKLY:
+                String day = tradeConfig.getResetDay().charAt(0)
+                        + tradeConfig.getResetDay().substring(1).toLowerCase();
+                return day + " " + tradeConfig.getResetTime();
+            case ROLLING:
+            default:
+                return "";
         }
-        return "";
     }
 
     /**
@@ -207,24 +227,38 @@ public class TradeDataManager {
     }
 
     /**
-     * Calculates the next reset time in epoch seconds based on configured daily reset time.
+     * Calculates the next reset time in epoch seconds for a trade's cooldown mode.
+     * Supports daily (next occurrence of HH:mm) and weekly (next occurrence of day + HH:mm).
      *
-     * @return Epoch seconds for the next reset time (today or tomorrow)
+     * @param tradeConfig The trade configuration
+     * @return Epoch seconds for the next reset time
      */
-    private long getNextDailyResetTime() {
-        String resetTimeStr = plugin.getConfigManager().getDailyResetTime();
-        String[] parts = resetTimeStr.split(":");
+    private long getNextResetTime(TradeConfig tradeConfig) {
+        String[] parts = tradeConfig.getResetTime().split(":");
         int hour = Integer.parseInt(parts[0]);
         int minute = Integer.parseInt(parts[1]);
 
-        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
-        java.time.ZonedDateTime todayReset = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0);
+        ZonedDateTime now = ZonedDateTime.now();
 
-        // If today's reset time has already passed, use tomorrow's reset time
+        if (tradeConfig.getCooldownMode() == CooldownMode.WEEKLY) {
+            DayOfWeek targetDay = DayOfWeek.valueOf(tradeConfig.getResetDay());
+            ZonedDateTime candidate = now
+                    .with(TemporalAdjusters.nextOrSame(targetDay))
+                    .withHour(hour).withMinute(minute).withSecond(0).withNano(0);
+
+            // If the candidate is today but the time has already passed, jump to next week
+            if (!candidate.isAfter(now)) {
+                candidate = now.with(TemporalAdjusters.next(targetDay))
+                        .withHour(hour).withMinute(minute).withSecond(0).withNano(0);
+            }
+            return candidate.toEpochSecond();
+        }
+
+        // DAILY mode
+        ZonedDateTime todayReset = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0);
         if (now.isAfter(todayReset)) {
             todayReset = todayReset.plusDays(1);
         }
-
         return todayReset.toEpochSecond();
     }
 
@@ -244,18 +278,25 @@ public class TradeDataManager {
         }
 
         long now = System.currentTimeMillis() / 1000;
+        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
+        CooldownMode mode = tradeConfig != null ? tradeConfig.getCooldownMode() : CooldownMode.ROLLING;
 
-        // Use fixed daily reset if enabled
-        if (plugin.getConfigManager().isFixedDailyReset()) {
-            // Check if the last trade was before the most recent reset time
-            long nextResetTime = getNextDailyResetTime();
-            long lastResetTime = nextResetTime - 86400; // Yesterday's reset time
-
-            return data.getLastResetEpoch() < lastResetTime;
-        } else {
-            // Use rolling cooldown
-            long elapsed = now - data.getLastResetEpoch();
-            return elapsed >= data.getCooldownSeconds();
+        switch (mode) {
+            case DAILY: {
+                long nextResetTime = getNextResetTime(tradeConfig);
+                long lastResetTime = nextResetTime - 86400; // Previous day's reset
+                return data.getLastResetEpoch() < lastResetTime;
+            }
+            case WEEKLY: {
+                long nextResetTime = getNextResetTime(tradeConfig);
+                long lastResetTime = nextResetTime - (7 * 86400); // Previous week's reset
+                return data.getLastResetEpoch() < lastResetTime;
+            }
+            case ROLLING:
+            default: {
+                long elapsed = now - data.getLastResetEpoch();
+                return elapsed >= data.getCooldownSeconds();
+            }
         }
     }
 
@@ -275,17 +316,22 @@ public class TradeDataManager {
         }
 
         long now = System.currentTimeMillis() / 1000;
+        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
+        CooldownMode mode = tradeConfig != null ? tradeConfig.getCooldownMode() : CooldownMode.ROLLING;
 
-        // Use fixed daily reset if enabled
-        if (plugin.getConfigManager().isFixedDailyReset()) {
-            long nextResetTime = getNextDailyResetTime();
-            long remaining = nextResetTime - now;
-            return Math.max(0, remaining);
-        } else {
-            // Use rolling cooldown
-            long elapsed = now - data.getLastResetEpoch();
-            long remaining = data.getCooldownSeconds() - elapsed;
-            return Math.max(0, remaining);
+        switch (mode) {
+            case DAILY:
+            case WEEKLY: {
+                long nextResetTime = getNextResetTime(tradeConfig);
+                long remaining = nextResetTime - now;
+                return Math.max(0, remaining);
+            }
+            case ROLLING:
+            default: {
+                long elapsed = now - data.getLastResetEpoch();
+                long remaining = data.getCooldownSeconds() - elapsed;
+                return Math.max(0, remaining);
+            }
         }
     }
 
@@ -363,6 +409,22 @@ public class TradeDataManager {
         if (plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info("Pre-loaded trade data for " + playerId + " in shop " + shopId);
         }
+    }
+
+    /**
+     * Evicts all data for a shop from cache and dirty tracking.
+     * Used when a shop is removed from config to clean up orphaned data.
+     *
+     * @param shopId The shop identifier
+     */
+    public void evictShop(String shopId) {
+        tradeCache.entrySet().removeIf(e -> e.getValue().getShopId().equals(shopId));
+        // Cache key format: "playerUUID:shopId:tradeKey" — match shopId between first and second colon
+        String suffix = ":" + shopId + ":";
+        dirtyKeys.removeIf(key -> {
+            int firstColon = key.indexOf(':');
+            return firstColon >= 0 && key.startsWith(suffix, firstColon);
+        });
     }
 
     /**
@@ -451,6 +513,15 @@ public class TradeDataManager {
         }
 
         return data;
+    }
+
+    /**
+     * Gets the TradeConfig for a specific shop and trade.
+     */
+    private TradeConfig getTradeConfig(String shopId, String tradeKey) {
+        ShopConfig shop = plugin.getConfigManager().getShop(shopId);
+        if (shop == null) return null;
+        return shop.getTrade(tradeKey);
     }
 
     /**

@@ -40,6 +40,12 @@ repositories {
         url = 'https://jitpack.io'
     }
 
+    // PlaceholderAPI
+    maven {
+        name = 'placeholderapi'
+        url = 'https://repo.extendedclip.com/content/repositories/placeholderapi/'
+    }
+
     // Shopkeepers API
     maven {
         name = 'shopkeepers-repo'
@@ -56,6 +62,9 @@ dependencies {
 
     // PacketEvents (use server's version instead of bundling)
     compileOnly 'com.github.retrooper:packetevents-spigot:2.10.0'
+
+    // PlaceholderAPI
+    compileOnly 'me.clip:placeholderapi:2.11.6'
 
     // SQLite JDBC (shaded into plugin)
     implementation 'org.xerial:sqlite-jdbc:3.42.0.0'

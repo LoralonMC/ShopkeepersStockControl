@@ -84,6 +84,14 @@ public interface DataStore {
     void deletePlayerShopData(UUID playerId, String shopId);
 
     /**
+     * Deletes all trade data for a specific shop (all players).
+     * Used to clean up orphaned data when a shop is removed from config.
+     *
+     * @param shopId The shop identifier
+     */
+    void deleteShopData(String shopId);
+
+    /**
      * Gets all player UUIDs that have trade data.
      *
      * @return List of player UUIDs

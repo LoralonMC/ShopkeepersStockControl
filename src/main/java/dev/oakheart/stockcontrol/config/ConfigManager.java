@@ -1,6 +1,7 @@
 package dev.oakheart.stockcontrol.config;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
+import dev.oakheart.stockcontrol.data.CooldownMode;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import org.bukkit.configuration.ConfigurationSection;
@@ -8,6 +9,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
+import java.time.DayOfWeek;
 import java.util.*;
 
 import static dev.oakheart.stockcontrol.config.Messages.*;
@@ -20,6 +22,10 @@ public class ConfigManager {
     private FileConfiguration config;
     private FileConfiguration tradesConfig;
     private volatile Map<String, ShopConfig> shops;
+
+    private static final Set<String> VALID_DAYS = Set.of(
+            "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"
+    );
 
     public ConfigManager(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
@@ -68,6 +74,17 @@ public class ConfigManager {
                 errors.forEach(error -> plugin.getLogger().severe("  - " + error));
                 plugin.getLogger().severe("Fix these errors in trades.yml!");
                 return false;
+            }
+
+            // Clean up orphaned shop data (shops that were in old config but not in new)
+            Set<String> orphanedIds = new HashSet<>(this.shops.keySet());
+            orphanedIds.removeAll(newShops.keySet());
+            if (!orphanedIds.isEmpty()) {
+                for (String orphanId : orphanedIds) {
+                    plugin.getTradeDataManager().evictShop(orphanId);
+                    plugin.getDataStore().deleteShopData(orphanId);
+                }
+                plugin.getLogger().info("Cleaned up " + orphanedIds.size() + " orphaned shop(s): " + orphanedIds);
             }
 
             // Atomically swap configurations
@@ -122,9 +139,14 @@ public class ConfigManager {
             ConfigurationSection shopSection = shopsSection.getConfigurationSection(shopId);
             if (shopSection == null) continue;
 
-            String name = shopSection.getString("name", shopId);  // Default to shopId if no name
+            String name = shopSection.getString("name", shopId);
             boolean enabled = shopSection.getBoolean("enabled", true);
             boolean respectShopStock = shopSection.getBoolean("respect_shop_stock", false);
+
+            // Per-shop cooldown settings
+            CooldownMode cooldownMode = CooldownMode.fromString(shopSection.getString("cooldown_mode", "rolling"));
+            String resetTime = shopSection.getString("reset_time", "00:00");
+            String resetDay = shopSection.getString("reset_day", "monday").toUpperCase();
 
             Map<String, TradeConfig> trades = new HashMap<>();
             ConfigurationSection tradesSection = shopSection.getConfigurationSection("trades");
@@ -137,17 +159,29 @@ public class ConfigManager {
                     int maxTrades = tradeSection.getInt("max_trades", 1);
                     int cooldown = tradeSection.getInt("cooldown", 86400);
 
+                    // Per-trade cooldown settings with shop-level fallback
+                    CooldownMode tradeCooldownMode = tradeSection.contains("cooldown_mode")
+                            ? CooldownMode.fromString(tradeSection.getString("cooldown_mode"))
+                            : cooldownMode;
+                    String tradeResetTime = tradeSection.getString("reset_time", resetTime);
+                    String tradeResetDay = tradeSection.contains("reset_day")
+                            ? tradeSection.getString("reset_day").toUpperCase()
+                            : resetDay;
+
                     if (isDebugMode()) {
                         plugin.getLogger().info("Loading trade '" + tradeKey + "' for shop " + shopId +
-                                ": slot=" + slot + ", max_trades=" + maxTrades + ", cooldown=" + cooldown);
+                                ": slot=" + slot + ", max_trades=" + maxTrades + ", cooldown=" + cooldown +
+                                ", mode=" + tradeCooldownMode);
                     }
 
-                    TradeConfig tradeConfig = new TradeConfig(tradeKey, slot, maxTrades, cooldown);
+                    TradeConfig tradeConfig = new TradeConfig(tradeKey, slot, maxTrades, cooldown,
+                            tradeCooldownMode, tradeResetTime, tradeResetDay);
                     trades.put(tradeKey, tradeConfig);
                 }
             }
 
-            ShopConfig shopConfig = new ShopConfig(shopId, name, enabled, respectShopStock, trades);
+            ShopConfig shopConfig = new ShopConfig(shopId, name, enabled, respectShopStock,
+                    cooldownMode, resetTime, resetDay, trades);
             loadedShops.put(shopId, shopConfig);
         }
 
@@ -183,11 +217,27 @@ public class ConfigManager {
                 if (trade.getMaxTrades() <= 0) {
                     errors.add("Trade '" + trade.getTradeKey() + "': max_trades must be > 0");
                 }
-                if (trade.getCooldownSeconds() <= 0) {
-                    errors.add("Trade '" + trade.getTradeKey() + "': cooldown must be > 0");
+                if (trade.getCooldownMode() == CooldownMode.ROLLING && trade.getCooldownSeconds() <= 0) {
+                    errors.add("Trade '" + trade.getTradeKey() + "': cooldown must be > 0 for rolling mode");
                 }
                 if (trade.getSlot() < 0) {
                     errors.add("Trade '" + trade.getTradeKey() + "': slot must be >= 0");
+                }
+
+                // Validate per-trade cooldown settings
+                CooldownMode mode = trade.getCooldownMode();
+                if (mode == CooldownMode.DAILY || mode == CooldownMode.WEEKLY) {
+                    String resetTime = trade.getResetTime();
+                    if (!resetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
+                        errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
+                                + "': reset_time must be in HH:mm format (00:00 to 23:59). Current: '" + resetTime + "'");
+                    }
+                }
+                if (mode == CooldownMode.WEEKLY) {
+                    if (!VALID_DAYS.contains(trade.getResetDay())) {
+                        errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
+                                + "': reset_day must be a valid day of the week. Current: '" + trade.getResetDay() + "'");
+                    }
                 }
             }
         }
@@ -238,14 +288,6 @@ public class ConfigManager {
             warnings.add("storage_type '" + storageType + "' is not supported. Only 'sqlite' is currently supported.");
         }
 
-        // Validate daily reset time format
-        if (isFixedDailyReset()) {
-            String resetTime = getDailyResetTime();
-            if (!resetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
-                warnings.add("daily_reset_time must be in HH:mm format (00:00 to 23:59). Current: '" + resetTime + "'");
-            }
-        }
-
         return warnings;
     }
 
@@ -266,20 +308,25 @@ public class ConfigManager {
         return config.getInt("batch_write_interval", 30);
     }
 
+    /**
+     * Refreshes only the main config.yml without reloading trades.yml
+     * or running orphan cleanup. Use this for lightweight changes like debug toggle.
+     */
+    public void refreshMainConfig() {
+        plugin.reloadConfig();
+        config = plugin.getConfig();
+    }
+
     public boolean isDebugMode() {
         return config.getBoolean("debug", false);
     }
 
-    public boolean isFixedDailyReset() {
-        return config.getBoolean("use_fixed_daily_reset", false);
-    }
-
-    public String getDailyResetTime() {
-        return config.getString("daily_reset_time", "00:00");
-    }
-
     public String getMessage(String key) {
         return config.getString("messages." + key, "<red>Message not found: " + key);
+    }
+
+    public String getMessageDisplay(String key) {
+        return config.getString("message_display." + key, "chat");
     }
 
     public Map<String, ShopConfig> getShops() {
@@ -288,6 +335,22 @@ public class ConfigManager {
 
     public ShopConfig getShop(String shopId) {
         return shops.get(shopId);
+    }
+
+    /**
+     * Finds a shop by its display name (case-insensitive).
+     * Returns the first match, or null if no shop has that name.
+     *
+     * @param name The display name to search for
+     * @return The matching ShopConfig, or null if not found
+     */
+    public ShopConfig getShopByName(String name) {
+        for (ShopConfig shop : shops.values()) {
+            if (shop.getName().equalsIgnoreCase(name)) {
+                return shop;
+            }
+        }
+        return null;
     }
 
     public boolean hasShop(String shopId) {

@@ -6,7 +6,6 @@ package dev.oakheart.stockcontrol.data;
  */
 public record ShopContext(
         String shopId,      // Shopkeeper's unique ID
-        int entityId,       // NPC entity ID
         long expiryTime     // When this context expires (milliseconds)
 ) {
     /**

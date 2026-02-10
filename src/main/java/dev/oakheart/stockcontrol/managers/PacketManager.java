@@ -79,13 +79,12 @@ public class PacketManager {
      *
      * @param playerId The player's UUID
      * @param shopId   The shop identifier
-     * @param entityId The NPC entity ID
      */
-    public void addShopMapping(UUID playerId, String shopId, int entityId) {
+    public void addShopMapping(UUID playerId, String shopId) {
         long cacheTTL = plugin.getConfigManager().getCacheTTL();
         long expiryTime = System.currentTimeMillis() + (cacheTTL * 1000L);
 
-        ShopContext context = new ShopContext(shopId, entityId, expiryTime);
+        ShopContext context = new ShopContext(shopId, expiryTime);
         playerShopCache.put(playerId, context);
 
         if (plugin.getConfigManager().isDebugMode()) {
@@ -128,7 +127,7 @@ public class PacketManager {
             // Refresh TTL to keep mapping alive while trading window is open
             long cacheTTL = plugin.getConfigManager().getCacheTTL();
             long newExpiry = System.currentTimeMillis() + (cacheTTL * 1000L);
-            return new ShopContext(context.shopId(), context.entityId(), newExpiry);
+            return new ShopContext(context.shopId(), newExpiry);
         });
     }
 

@@ -27,6 +27,7 @@ public class SQLiteDataStore implements DataStore {
     private PreparedStatement deleteTradeStmt;
     private PreparedStatement deletePlayerStmt;
     private PreparedStatement deletePlayerShopStmt;
+    private PreparedStatement deleteShopStmt;
     private PreparedStatement getAllPlayersStmt;
 
     public SQLiteDataStore(ShopkeepersStockControl plugin) {
@@ -150,6 +151,11 @@ public class SQLiteDataStore implements DataStore {
         // Delete all trades for a player in a specific shop
         deletePlayerShopStmt = connection.prepareStatement(
                 "DELETE FROM player_trades WHERE player_uuid = ? AND shop_id = ?"
+        );
+
+        // Delete all trades for a specific shop (all players)
+        deleteShopStmt = connection.prepareStatement(
+                "DELETE FROM player_trades WHERE shop_id = ?"
         );
 
         // Get all unique player UUIDs
@@ -315,6 +321,21 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
+    public synchronized void deleteShopData(String shopId) {
+        if (!operational) return;
+
+        try {
+            deleteShopStmt.setString(1, shopId);
+            int deleted = deleteShopStmt.executeUpdate();
+            if (deleted > 0) {
+                plugin.getLogger().info("Deleted " + deleted + " orphaned trade entries for shop " + shopId);
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error deleting shop data", e);
+        }
+    }
+
+    @Override
     public synchronized List<UUID> getAllPlayers() {
         List<UUID> result = new ArrayList<>();
         if (!operational) return result;
@@ -351,6 +372,7 @@ public class SQLiteDataStore implements DataStore {
             if (deleteTradeStmt != null) deleteTradeStmt.close();
             if (deletePlayerStmt != null) deletePlayerStmt.close();
             if (deletePlayerShopStmt != null) deletePlayerShopStmt.close();
+            if (deleteShopStmt != null) deleteShopStmt.close();
             if (getAllPlayersStmt != null) getAllPlayersStmt.close();
 
             // Close connection

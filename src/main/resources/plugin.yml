@@ -7,12 +7,12 @@ description: A Shopkeepers addon that enables per-player trade limits with accur
 website: https://github.com/LoralonMC/ShopkeepersStockControl
 
 depend: [ Shopkeepers ]
-softdepend: [ PacketEvents ]
+softdepend: [ PacketEvents, PlaceholderAPI ]
 
 commands:
   ssc:
     description: ShopkeepersStockControl main command
-    usage: /ssc <reload|reset|check|debug|cleanup|help>
+    usage: /ssc <reload|reset|check|info|debug|cleanup|help>
     aliases: [ shopkeepersstock, stockcontrol ]
     permission: shopkeepersstock.admin
 

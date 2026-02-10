@@ -1,9 +1,10 @@
 package dev.oakheart.stockcontrol.commands;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
+import dev.oakheart.stockcontrol.data.CooldownMode;
 import dev.oakheart.stockcontrol.data.PlayerTradeData;
 import dev.oakheart.stockcontrol.data.ShopConfig;
-import net.kyori.adventure.text.Component;
+import dev.oakheart.stockcontrol.data.TradeConfig;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
@@ -48,6 +49,9 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
             case "check":
                 return handleCheck(sender, args);
 
+            case "info":
+                return handleInfo(sender, args);
+
             case "debug":
                 return handleDebug(sender);
 
@@ -85,6 +89,20 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         }
 
         return null;
+    }
+
+    /**
+     * Resolves a shop argument to a ShopConfig, trying display name first then ID.
+     *
+     * @param arg The shop name or ID
+     * @return The ShopConfig, or null if not found
+     */
+    private ShopConfig resolveShop(String arg) {
+        ShopConfig shop = plugin.getConfigManager().getShopByName(arg);
+        if (shop == null) {
+            shop = plugin.getConfigManager().getShop(arg);
+        }
+        return shop;
     }
 
     /**
@@ -143,7 +161,14 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         }
 
         // Reset specific shop or trade
-        String shopId = args[2];
+        ShopConfig shop = resolveShop(args[2]);
+        if (shop == null) {
+            sender.sendMessage(miniMessage.deserialize(
+                    "<red>Shop not found: <white><shop>",
+                    Placeholder.unparsed("shop", args[2])));
+            return true;
+        }
+        String shopId = shop.getShopId();
 
         if (args.length == 3) {
             // Reset all trades for specific shop
@@ -161,7 +186,7 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                     "<green>Reset <white><count></white> trades for player <white><player></white> in shop <white><shop>",
                     Placeholder.unparsed("count", String.valueOf(resetCount)),
                     Placeholder.unparsed("player", playerName),
-                    Placeholder.unparsed("shop", shopId)));
+                    Placeholder.unparsed("shop", shop.getName())));
             return true;
         }
 
@@ -172,7 +197,7 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                 "<green>Reset trade <white><trade></white> for player <white><player></white> in shop <white><shop>",
                 Placeholder.unparsed("trade", tradeKey),
                 Placeholder.unparsed("player", playerName),
-                Placeholder.unparsed("shop", shopId)));
+                Placeholder.unparsed("shop", shop.getName())));
 
         return true;
     }
@@ -215,7 +240,14 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
 
         // Filter by shop if specified
         if (args.length >= 3) {
-            String shopId = args[2];
+            ShopConfig filterShop = resolveShop(args[2]);
+            if (filterShop == null) {
+                sender.sendMessage(miniMessage.deserialize(
+                        "<red>Shop not found: <white><shop>",
+                        Placeholder.unparsed("shop", args[2])));
+                return true;
+            }
+            String shopId = filterShop.getShopId();
             playerTrades = playerTrades.stream()
                     .filter(data -> data.getShopId().equals(shopId))
                     .collect(Collectors.toList());
@@ -224,7 +256,7 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(miniMessage.deserialize(
                         "<yellow>Player <white><player></white> has no trades in shop <white><shop>",
                         Placeholder.unparsed("player", playerName),
-                        Placeholder.unparsed("shop", shopId)));
+                        Placeholder.unparsed("shop", filterShop.getName())));
                 return true;
             }
         }
@@ -281,7 +313,7 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
 
             if (timeRemaining > 0) {
                 String resetInfo = plugin.getTradeDataManager().formatDuration(timeRemaining);
-                String resetTime = plugin.getTradeDataManager().getResetTimeString();
+                String resetTime = plugin.getTradeDataManager().getResetTimeString(data.getShopId(), data.getTradeKey());
                 if (!resetTime.isEmpty()) {
                     resetInfo += " (Resets at " + resetTime + ")";
                 }
@@ -291,6 +323,83 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
             } else {
                 sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <green>Ready"));
             }
+        }
+
+        return true;
+    }
+
+    /**
+     * Handles /ssc info <shop> - Shows shop configuration details
+     */
+    private boolean handleInfo(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("shopkeepersstock.admin")) {
+            sender.sendMessage(miniMessage.deserialize("<red>You don't have permission to use this command"));
+            return true;
+        }
+
+        if (args.length < 2) {
+            sender.sendMessage(miniMessage.deserialize("<red>Usage: /ssc info <shop>"));
+            return true;
+        }
+
+        ShopConfig shop = resolveShop(args[1]);
+        if (shop == null) {
+            sender.sendMessage(miniMessage.deserialize(
+                    "<red>Shop not found: <white><shop>",
+                    Placeholder.unparsed("shop", args[1])));
+            return true;
+        }
+
+        // Header
+        String shortId = shop.getShopId().length() > 8
+                ? shop.getShopId().substring(0, 8) + "..."
+                : shop.getShopId();
+        sender.sendMessage(miniMessage.deserialize(
+                "<green>=== Shop Info: <white><name></white> ===",
+                Placeholder.unparsed("name", shop.getName())));
+        sender.sendMessage(miniMessage.deserialize(
+                "<aqua>ID: <white><id>",
+                Placeholder.unparsed("id", shortId)));
+        sender.sendMessage(miniMessage.deserialize(
+                "<aqua>Enabled: <white><enabled>",
+                Placeholder.unparsed("enabled", String.valueOf(shop.isEnabled()))));
+        sender.sendMessage(miniMessage.deserialize(
+                "<aqua>Cooldown Mode: <white><mode>",
+                Placeholder.unparsed("mode", shop.getCooldownMode().name().toLowerCase())));
+
+        if (shop.getCooldownMode() == CooldownMode.DAILY || shop.getCooldownMode() == CooldownMode.WEEKLY) {
+            sender.sendMessage(miniMessage.deserialize(
+                    "<aqua>Reset Time: <white><time>",
+                    Placeholder.unparsed("time", shop.getResetTime())));
+        }
+        if (shop.getCooldownMode() == CooldownMode.WEEKLY) {
+            String day = shop.getResetDay().charAt(0) + shop.getResetDay().substring(1).toLowerCase();
+            sender.sendMessage(miniMessage.deserialize(
+                    "<aqua>Reset Day: <white><day>",
+                    Placeholder.unparsed("day", day)));
+        }
+
+        // Trades
+        sender.sendMessage(miniMessage.deserialize(
+                "<aqua>Trades: <white><count>",
+                Placeholder.unparsed("count", String.valueOf(shop.getTrades().size()))));
+
+        for (TradeConfig trade : shop.getTrades().values()) {
+            StringBuilder details = new StringBuilder();
+            details.append("slot ").append(trade.getSlot())
+                    .append(", max ").append(trade.getMaxTrades());
+
+            if (trade.getCooldownMode() != shop.getCooldownMode()) {
+                details.append(", mode ").append(trade.getCooldownMode().name().toLowerCase());
+            }
+            if (trade.getCooldownMode() == CooldownMode.ROLLING) {
+                details.append(", cooldown ").append(plugin.getTradeDataManager().formatDuration(trade.getCooldownSeconds()));
+            }
+
+            sender.sendMessage(miniMessage.deserialize(
+                    "<gray>  - <white><key><gray> (<details>)",
+                    Placeholder.unparsed("key", trade.getTradeKey()),
+                    Placeholder.unparsed("details", details.toString())));
         }
 
         return true;
@@ -308,10 +417,10 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         boolean currentDebug = plugin.getConfigManager().isDebugMode();
         boolean newDebug = !currentDebug;
 
-        // Update config in memory
+        // Update config on disk and refresh in-memory (lightweight, no trades reload)
         plugin.getConfig().set("debug", newDebug);
         plugin.saveConfig();
-        plugin.getConfigManager().reload();
+        plugin.getConfigManager().refreshMainConfig();
 
         if (newDebug) {
             sender.sendMessage(miniMessage.deserialize("<green>Debug mode enabled"));
@@ -350,6 +459,7 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc reload<white> - Reload configuration"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc reset <player> [shop] [trade]<white> - Reset trade data"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc check <player> [shop] [trade]<white> - Check remaining trades"));
+        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc info <shop><white> - Show shop configuration details"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc debug<white> - Toggle debug mode"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc cleanup<white> - Manually trigger cleanup"));
         sender.sendMessage(miniMessage.deserialize("<aqua>/ssc help<white> - Show this help message"));
@@ -363,12 +473,14 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 1) {
             // Suggest subcommands
-            return Arrays.asList("reload", "reset", "check", "debug", "cleanup", "help").stream()
+            return Arrays.asList("reload", "reset", "check", "info", "debug", "cleanup", "help").stream()
                     .filter(sub -> sub.startsWith(args[0].toLowerCase()))
                     .collect(Collectors.toList());
         }
 
-        if (args.length == 2 && (args[0].equalsIgnoreCase("reset") || args[0].equalsIgnoreCase("check"))) {
+        String sub = args[0].toLowerCase();
+
+        if (args.length == 2 && (sub.equals("reset") || sub.equals("check"))) {
             // Suggest online player names
             return Bukkit.getOnlinePlayers().stream()
                     .map(Player::getName)
@@ -376,17 +488,28 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                     .collect(Collectors.toList());
         }
 
-        if (args.length == 3 && (args[0].equalsIgnoreCase("reset") || args[0].equalsIgnoreCase("check"))) {
-            // Suggest shop IDs
-            return plugin.getConfigManager().getShops().keySet().stream()
-                    .filter(shopId -> shopId.toLowerCase().startsWith(args[2].toLowerCase()))
+        if (args.length == 2 && sub.equals("info")) {
+            // Suggest shop display names
+            return plugin.getConfigManager().getShops().values().stream()
+                    .map(ShopConfig::getName)
+                    .filter(name -> name.toLowerCase().startsWith(args[1].toLowerCase()))
                     .collect(Collectors.toList());
         }
 
-        if (args.length == 4 && (args[0].equalsIgnoreCase("reset") || args[0].equalsIgnoreCase("check"))) {
-            // Suggest trade keys for the specified shop
-            String shopId = args[2];
-            ShopConfig shop = plugin.getConfigManager().getShop(shopId);
+        if (args.length == 3 && (sub.equals("reset") || sub.equals("check"))) {
+            // Suggest shop display names
+            return plugin.getConfigManager().getShops().values().stream()
+                    .map(ShopConfig::getName)
+                    .filter(name -> name.toLowerCase().startsWith(args[2].toLowerCase()))
+                    .collect(Collectors.toList());
+        }
+
+        if (args.length == 4 && (sub.equals("reset") || sub.equals("check"))) {
+            // Suggest trade keys for the specified shop (resolve by name first, then ID)
+            ShopConfig shop = plugin.getConfigManager().getShopByName(args[2]);
+            if (shop == null) {
+                shop = plugin.getConfigManager().getShop(args[2]);
+            }
 
             if (shop != null) {
                 return shop.getTrades().keySet().stream()

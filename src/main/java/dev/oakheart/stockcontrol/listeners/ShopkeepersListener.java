@@ -1,10 +1,5 @@
 package dev.oakheart.stockcontrol.listeners;
 
-/*
- * PHASE 4 - SHOPKEEPERS INTEGRATION
- * Shopkeepers JAR has been added to the build.
- */
-
 import com.nisovin.shopkeepers.api.events.ShopkeeperOpenUIEvent;
 import com.nisovin.shopkeepers.api.events.ShopkeeperTradeEvent;
 import com.nisovin.shopkeepers.api.shopkeeper.Shopkeeper;
@@ -16,6 +11,7 @@ import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.managers.PacketManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -27,8 +23,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 /**
  * Listens for Shopkeepers events to track shop openings and validate trades.
  * Manages the critical player -> shop mapping for packet modification.
- *
- * PHASE 4 STATUS: Implementation complete, awaiting Shopkeepers JAR for compilation.
  */
 public class ShopkeepersListener implements Listener {
 
@@ -56,12 +50,8 @@ public class ShopkeepersListener implements Listener {
         // Get shop ID (use Shopkeeper's unique ID)
         String shopId = shopkeeper.getUniqueId().toString();
 
-        // Note: Shopkeepers 2.24.0+ API has changed, entity ID not needed for our purposes
-        // We use the shopkeeper's unique ID as the primary identifier
-        int entityId = 0; // Placeholder, not used in packet modification
-
         // Add to cache for packet modification
-        packetManager.addShopMapping(player.getUniqueId(), shopId, entityId);
+        packetManager.addShopMapping(player.getUniqueId(), shopId);
 
         // Pre-load trade data into cache so the packet thread never hits the database
         tradeDataManager.preloadShopData(player.getUniqueId(), shopId);
@@ -123,9 +113,9 @@ public class ShopkeepersListener implements Listener {
             long timeRemaining = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             String message = plugin.getConfigManager().getMessage(Messages.TRADE_LIMIT_REACHED);
             if (message != null && !message.isBlank()) {
-                message = message.replace("%time_remaining%", tradeDataManager.formatDuration(timeRemaining))
-                                 .replace("%reset_time%", tradeDataManager.getResetTimeString());
-                player.sendMessage(miniMessage.deserialize(message));
+                message = message.replace("{time_remaining}", tradeDataManager.formatDuration(timeRemaining))
+                                 .replace("{reset_time}", tradeDataManager.getResetTimeString(shopId, matchedTradeKey));
+                sendFeedback(player, Messages.TRADE_LIMIT_REACHED, message);
             }
 
             if (plugin.getConfigManager().isDebugMode()) {
@@ -150,9 +140,9 @@ public class ShopkeepersListener implements Listener {
             long timeUntilReset = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             String message = plugin.getConfigManager().getMessage(Messages.COOLDOWN_ACTIVE);
             if (message != null && !message.isBlank()) {
-                message = message.replace("%time_remaining%", tradeDataManager.formatDuration(timeUntilReset))
-                                 .replace("%reset_time%", tradeDataManager.getResetTimeString());
-                player.sendMessage(miniMessage.deserialize(message));
+                message = message.replace("{time_remaining}", tradeDataManager.formatDuration(timeUntilReset))
+                                 .replace("{reset_time}", tradeDataManager.getResetTimeString(shopId, matchedTradeKey));
+                sendFeedback(player, Messages.COOLDOWN_ACTIVE, message);
             }
         } else {
             // Show remaining trades
@@ -160,9 +150,9 @@ public class ShopkeepersListener implements Listener {
             if (tradeConfig != null) {
                 String message = plugin.getConfigManager().getMessage(Messages.TRADES_REMAINING);
                 if (message != null && !message.isBlank()) {
-                    message = message.replace("%remaining%", String.valueOf(remaining))
-                                     .replace("%max%", String.valueOf(tradeConfig.getMaxTrades()));
-                    player.sendMessage(miniMessage.deserialize(message));
+                    message = message.replace("{remaining}", String.valueOf(remaining))
+                                     .replace("{max}", String.valueOf(tradeConfig.getMaxTrades()));
+                    sendFeedback(player, Messages.TRADES_REMAINING, message);
                 }
             }
         }
@@ -174,17 +164,21 @@ public class ShopkeepersListener implements Listener {
         }
     }
 
+    private void sendFeedback(Player player, String messageKey, String message) {
+        if (message == null || message.isBlank()) return;
+        Component component = miniMessage.deserialize(message);
+        if ("action_bar".equalsIgnoreCase(plugin.getConfigManager().getMessageDisplay(messageKey))) {
+            player.sendActionBar(component);
+        } else {
+            player.sendMessage(component);
+        }
+    }
+
     private String findMatchingTradeKey(ShopConfig shopConfig, ShopkeeperTradeEvent event) {
         try {
             var clickedRecipe = event.getTradingRecipe();
             var shopkeeper = event.getShopkeeper();
             var player = event.getPlayer();
-            var trades = shopConfig.getTrades();
-
-            // If there's only one configured trade, it must be that one
-            if (trades.size() == 1) {
-                return trades.keySet().iterator().next();
-            }
 
             // Get all trading recipes from the shopkeeper and find the clicked one
             var allRecipes = shopkeeper.getTradingRecipes(player);

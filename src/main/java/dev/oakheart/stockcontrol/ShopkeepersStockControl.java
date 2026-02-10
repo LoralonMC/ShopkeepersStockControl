@@ -8,7 +8,9 @@ import dev.oakheart.stockcontrol.listeners.ShopkeepersListener;
 import dev.oakheart.stockcontrol.managers.CooldownManager;
 import dev.oakheart.stockcontrol.managers.PacketManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
+import dev.oakheart.stockcontrol.placeholders.StockControlExpansion;
 import org.bstats.bukkit.Metrics;
+import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -33,9 +35,10 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
         instance = this;
 
         // ASCII art banner
+        String ver = getDescription().getVersion();
         getLogger().info("╔═══════════════════════════════════════════╗");
         getLogger().info("║  ShopkeepersStockControl                 ║");
-        getLogger().info("║  Version: " + getDescription().getVersion() + "                            ║");
+        getLogger().info(String.format("║  Version: %-32s║", ver));
         getLogger().info("║  Per-player trade limits with cooldowns  ║");
         getLogger().info("╚═══════════════════════════════════════════╝");
 
@@ -103,6 +106,12 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
         getCommand("ssc").setExecutor(commandExecutor);
         getCommand("ssc").setTabCompleter(commandExecutor);
         getLogger().info("Commands registered successfully");
+
+        // Register PlaceholderAPI expansion if available
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new StockControlExpansion(this).register();
+            getLogger().info("PlaceholderAPI expansion registered");
+        }
 
         // Initialize bStats metrics (anonymous usage statistics)
         try {

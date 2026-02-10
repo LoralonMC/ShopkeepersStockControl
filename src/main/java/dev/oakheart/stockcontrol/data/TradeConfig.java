@@ -3,12 +3,16 @@ package dev.oakheart.stockcontrol.data;
 /**
  * Represents the configuration for a single trade.
  * Uses a stable trade key that doesn't change even if trades are reordered.
+ * Each trade has its own cooldown mode, resolved at load time with shop-level fallback.
  */
 public class TradeConfig {
-    private final String tradeKey;      // Stable identifier (e.g., "diamond_trade")
-    private final int slot;             // Current slot position
-    private final int maxTrades;        // Maximum number of trades allowed
-    private final int cooldownSeconds;  // Cooldown duration in seconds
+    private final String tradeKey;          // Stable identifier (e.g., "diamond_trade")
+    private final int slot;                 // Current slot position
+    private final int maxTrades;            // Maximum number of trades allowed
+    private final int cooldownSeconds;      // Cooldown duration in seconds (for rolling mode)
+    private final CooldownMode cooldownMode; // Resolved cooldown mode (trade-level or inherited from shop)
+    private final String resetTime;         // HH:mm for daily/weekly modes
+    private final String resetDay;          // Day of week for weekly mode (e.g., "MONDAY")
 
     /**
      * Creates a new TradeConfig instance.
@@ -17,12 +21,19 @@ public class TradeConfig {
      * @param slot             Current slot position (0-indexed)
      * @param maxTrades        Maximum number of trades allowed
      * @param cooldownSeconds  Cooldown duration in seconds
+     * @param cooldownMode     Resolved cooldown mode
+     * @param resetTime        Reset time in HH:mm format
+     * @param resetDay         Day of week for weekly resets (e.g., "MONDAY")
      */
-    public TradeConfig(String tradeKey, int slot, int maxTrades, int cooldownSeconds) {
+    public TradeConfig(String tradeKey, int slot, int maxTrades, int cooldownSeconds,
+                       CooldownMode cooldownMode, String resetTime, String resetDay) {
         this.tradeKey = tradeKey;
         this.slot = slot;
         this.maxTrades = maxTrades;
         this.cooldownSeconds = cooldownSeconds;
+        this.cooldownMode = cooldownMode;
+        this.resetTime = resetTime;
+        this.resetDay = resetDay;
     }
 
     public String getTradeKey() {
@@ -41,6 +52,18 @@ public class TradeConfig {
         return cooldownSeconds;
     }
 
+    public CooldownMode getCooldownMode() {
+        return cooldownMode;
+    }
+
+    public String getResetTime() {
+        return resetTime;
+    }
+
+    public String getResetDay() {
+        return resetDay;
+    }
+
     /**
      * Validates this trade configuration.
      *
@@ -50,7 +73,7 @@ public class TradeConfig {
         return tradeKey != null && !tradeKey.isEmpty()
                 && slot >= 0
                 && maxTrades > 0
-                && cooldownSeconds > 0;
+                && (cooldownMode != CooldownMode.ROLLING || cooldownSeconds > 0);
     }
 
     @Override
@@ -60,6 +83,7 @@ public class TradeConfig {
                 ", slot=" + slot +
                 ", maxTrades=" + maxTrades +
                 ", cooldownSeconds=" + cooldownSeconds +
+                ", cooldownMode=" + cooldownMode +
                 '}';
     }
 }

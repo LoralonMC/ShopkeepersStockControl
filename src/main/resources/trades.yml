@@ -13,59 +13,79 @@
 #     name: "Display Name"  # Optional: Friendly name shown in /ssc check (defaults to shopkeeper_id)
 #     enabled: true
 #     respect_shop_stock: false  # true = respect Shopkeepers' finite stock, false = admin shops (infinite)
+#     cooldown_mode: daily       # Shop-level default: daily, weekly, or rolling (default: rolling)
+#     reset_time: "00:00"        # Shop-level default for daily/weekly: HH:mm (default: "00:00")
+#     reset_day: "monday"        # Shop-level default for weekly: day of week (default: "monday")
 #     trades:
-#       <stable_trade_key>:  # Create your own stable identifiers (e.g., "diamond_trade")
-#         slot: <number>      # REQUIRED: Position in villager UI (0 = first trade, 1 = second, etc.)
-#         max_trades: <number>  # REQUIRED: How many times a player can do this trade
-#         cooldown: <seconds>   # REQUIRED: Cooldown duration (86400 = 24 hours, 604800 = 7 days)
+#       <stable_trade_key>:
+#         slot: <number>           # REQUIRED: Position in villager UI (0 = first trade, 1 = second, etc.)
+#         max_trades: <number>     # REQUIRED: How many times a player can do this trade
+#         cooldown: <seconds>      # Cooldown duration in seconds (required for rolling mode, optional for daily/weekly)
+#         cooldown_mode: rolling   # Optional: Override shop-level default for this trade
+#         reset_time: "00:00"      # Optional: Override shop-level reset time
+#         reset_day: "monday"      # Optional: Override shop-level reset day (weekly only)
+#
+# COOLDOWN MODES:
+#   daily   - Trade resets at reset_time every day (e.g., midnight)
+#   weekly  - Trade resets at reset_time on reset_day each week (e.g., Monday midnight)
+#   rolling - Trade resets individually X seconds after the player's first trade
+#
+# HIERARCHY: Per-trade settings override per-shop settings.
+# If a trade doesn't specify cooldown_mode/reset_time/reset_day, it inherits from the shop.
+# If the shop doesn't specify them either, defaults are: rolling / 00:00 / monday.
 
 # EXAMPLE configurations (replace these with your actual Shopkeeper UUIDs!)
 # These are just examples to show the format - they won't work without real IDs
 shops:
 
-  # Replace "miner" with your actual Shopkeeper UUID
+  # Daily reset example - all trades reset at midnight (shop-level default)
   miner:
     name: "Miner"
     enabled: true
     respect_shop_stock: false  # Admin shop with infinite stock
+    cooldown_mode: daily
+    reset_time: "00:00"
     trades:
       diamond_trade:
         slot: 0
         max_trades: 4
-        cooldown: 86400  # 24 hours
+        cooldown: 86400
       netherite_scrap_trade:
         slot: 1
         max_trades: 1
-        cooldown: 86400  # 24 hours
+        cooldown: 86400
       gold_ingot_trade:
         slot: 2
         max_trades: 4
-        cooldown: 86400  # 24 hours
+        cooldown: 86400
 
-  # Replace "lumberjack" with your actual Shopkeeper UUID
+  # Daily reset at 6 AM (shop-level default)
   lumberjack:
     name: "Lumberjack"
     enabled: true
     respect_shop_stock: false
+    cooldown_mode: daily
+    reset_time: "06:00"
     trades:
       oak_log_trade:
         slot: 0
         max_trades: 2
-        cooldown: 86400  # 24 hours
+        cooldown: 86400
       spruce_log_trade:
         slot: 1
         max_trades: 2
-        cooldown: 86400  # 24 hours
+        cooldown: 86400
       birch_log_trade:
         slot: 2
         max_trades: 2
-        cooldown: 86400  # 24 hours
+        cooldown: 86400
 
-  # Replace "farmer" with your actual Shopkeeper UUID
+  # Rolling cooldown example - each trade resets 24h after first use
   farmer:
     name: "Farmer"
     enabled: true
     respect_shop_stock: false
+    cooldown_mode: rolling
     trades:
       honey_bottle_trade:
         slot: 0
@@ -80,11 +100,12 @@ shops:
         max_trades: 5
         cooldown: 86400  # 24 hours
 
-  # Replace "alchemist" with your actual Shopkeeper UUID
+  # Rolling cooldown with varied durations
   alchemist:
     name: "Alchemist"
     enabled: true
     respect_shop_stock: false
+    cooldown_mode: rolling
     trades:
       wither_skull_trade:
         slot: 0
@@ -99,21 +120,25 @@ shops:
         max_trades: 4
         cooldown: 86400  # 24 hours
 
-  # Replace "fisherman" with your actual Shopkeeper UUID
+  # Mixed cooldown example - shop defaults to daily, but rare trade overrides to weekly
   fisherman:
     name: "Fisherman"
     enabled: true
     respect_shop_stock: false
+    cooldown_mode: daily
+    reset_time: "00:00"
     trades:
       heart_of_sea_trade:
         slot: 0
         max_trades: 1
-        cooldown: 604800  # 7 days (example of longer cooldown)
+        cooldown: 604800
+        cooldown_mode: weekly    # Override: this rare trade resets weekly instead of daily
+        reset_day: "monday"
       nautilus_shell_trade:
         slot: 1
         max_trades: 2
-        cooldown: 86400  # 24 hours
+        cooldown: 86400          # Inherits daily mode from shop
       cod_trade:
         slot: 2
         max_trades: 10
-        cooldown: 86400  # 24 hours
+        cooldown: 86400          # Inherits daily mode from shop
