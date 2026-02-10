@@ -7,28 +7,33 @@ A powerful Paper plugin that adds **per-player trade limits** to [Shopkeepers](h
 
 ## Features
 
-- ✨ **Per-Player Trade Limits** - Each player has their own independent trade limits
-- ⏰ **Configurable Cooldowns** - Set different cooldown periods for each trade (hours, days, weeks)
-- 📊 **Real-Time Stock Display** - Players see their remaining trades directly in the villager UI
-- 🎯 **Slot-Based Tracking** - Track specific trades in each Shopkeeper independently
-- 💾 **SQLite Database** - Persistent data storage with automatic backups
-- 🔧 **Easy Configuration** - YAML-based configuration with helpful comments
-- 🎨 **MiniMessage Support** - Modern text formatting with gradients and colors
-- 📈 **bStats Metrics** - Anonymous usage statistics for development priorities
+- **Per-Player Trade Limits** - Each player has their own independent trade limits
+- **Three Cooldown Modes** - Daily reset (e.g., midnight), weekly reset (e.g., Monday), or rolling cooldown (e.g., 24h after first trade)
+- **Per-Trade Overrides** - Each trade can override the shop's cooldown mode (e.g., most trades reset daily, but a rare trade resets weekly)
+- **Real-Time Stock Display** - Players see their remaining trades directly in the villager UI via PacketEvents
+- **Slot-Based Tracking** - Track specific trades in each Shopkeeper independently
+- **Action Bar Messages** - Trade feedback can appear on the action bar instead of chat
+- **PlaceholderAPI Support** - Use trade data in scoreboards, holograms, tab lists, etc.
+- **Auto-Cleanup** - Orphaned shop data is automatically removed on config reload
+- **SQLite Database** - Persistent data storage with batch writes and prepared statements
+- **MiniMessage Support** - Modern text formatting with gradients and colors
+- **bStats Metrics** - Anonymous usage statistics for development priorities
 
 ## Screenshots
 
 When a player opens a Shopkeeper, they see **their personal stock** for each trade:
-- ✅ Trades show exact remaining count (e.g., "2/4 remaining")
-- ❌ Depleted trades automatically cross out when limit reached
-- 🔄 Stock refreshes on cooldown expiry
+- Trades show exact remaining count (e.g., "2/4 remaining")
+- Depleted trades automatically cross out when limit reached
+- Stock refreshes on cooldown expiry
 
 ## Requirements
 
 - **Server**: Paper 1.21+ (or any Paper fork)
-- **Dependencies**:
+- **Required Dependencies**:
   - [Shopkeepers](https://github.com/Shopkeepers/Shopkeepers) 2.24.0+
   - [PacketEvents](https://github.com/retrooper/packetevents) 2.10.0+ (as a plugin on your server)
+- **Optional Dependencies**:
+  - [PlaceholderAPI](https://github.com/PlaceholderAPI/PlaceholderAPI) - for external placeholder support
 - **Java**: 21+
 
 ## Installation
@@ -57,28 +62,61 @@ You need the UUID of each Shopkeeper you want to track. Two methods:
 # Select the Shopkeeper, use the command to view its details
 ```
 
+### Cooldown Modes
+
+The plugin supports three cooldown modes, configurable at the shop level with per-trade overrides:
+
+| Mode | Behavior | Example |
+|------|----------|---------|
+| `daily` | Resets at a fixed time every day | All trades reset at midnight |
+| `weekly` | Resets at a fixed time on a specific day | Rare trades reset Monday at 00:00 |
+| `rolling` | Resets X seconds after the player's first trade | 24h personal cooldown per player |
+
 ### Example trades.yml
 
 ```yaml
 shops:
-  # Replace with your actual Shopkeeper UUID
+  # Daily reset shop - all trades reset at midnight
   e8f4a3c2-1234-5678-9abc-def012345678:
-    name: "Diamond Merchant"  # Friendly display name
+    name: "Miner"
     enabled: true
-    respect_shop_stock: false  # Set to true for finite-stock shops
+    respect_shop_stock: false
+    cooldown_mode: daily
+    reset_time: "00:00"
     trades:
       diamond_trade:
-        slot: 0  # Position in villager UI (0 = first trade)
-        max_trades: 4  # Player can do this trade 4 times
-        cooldown: 86400  # 24 hours in seconds
-
+        slot: 0
+        max_trades: 4
       netherite_trade:
         slot: 1
         max_trades: 1
-        cooldown: 604800  # 7 days
+        cooldown_mode: weekly    # Override: this rare trade resets weekly
+        reset_day: "monday"
+
+  # Rolling cooldown shop - each trade resets 24h after first use
+  a1b2c3d4-5678-9abc-def0-123456789abc:
+    name: "Farmer"
+    enabled: true
+    respect_shop_stock: false
+    cooldown_mode: rolling
+    trades:
+      wheat_trade:
+        slot: 0
+        max_trades: 5
+        cooldown: 86400          # 24 hours (required for rolling mode)
+      carrot_trade:
+        slot: 1
+        max_trades: 5
+        cooldown: 86400
 ```
 
-### Cooldown Reference
+**Key points:**
+- `cooldown_mode`, `reset_time`, and `reset_day` can be set at the shop level (defaults for all trades) or per-trade (overrides)
+- `cooldown` (seconds) is **required** for `rolling` mode, **optional** for `daily`/`weekly`
+- If a trade doesn't specify `cooldown_mode`, it inherits from the shop
+- If the shop doesn't specify `cooldown_mode`, it defaults to `rolling`
+
+#### Rolling Cooldown Reference
 
 | Duration | Seconds |
 |----------|---------|
@@ -95,28 +133,59 @@ Edit `config.yml` to customize player messages using [MiniMessage](https://docs.
 
 ```yaml
 messages:
-  trade_limit_reached: "<red>You've reached your limit! <gray>(%time_remaining% remaining)"
-  trades_remaining: "<gray>Trades remaining: <green>%remaining%<gray>/<green>%max%"
-  cooldown_active: "<red>Cooldown active. Time remaining: <yellow>%time_remaining%"
+  trade_limit_reached: "<red>You've reached your limit! <gray>Cooldown: <yellow>{time_remaining}<gray> (Resets at {reset_time})"
+  trades_remaining: "<gray>Trades remaining: <green>{remaining}<gray>/<green>{max}"
+  cooldown_active: "<red>Cooldown active. <yellow>{time_remaining}<gray> (Resets at {reset_time})"
 ```
 
-**Available Placeholders:**
-- `%time_remaining%` - Time until cooldown expires (e.g., "23h 45m")
-- `%remaining%` - Trades remaining for the player
-- `%max%` - Maximum trades allowed
-- `%player%` - Player's name
+**Available placeholders:**
+- `{time_remaining}` - Time until cooldown expires (e.g., "23h 45m")
+- `{reset_time}` - Reset time display (e.g., "00:00" for daily, "Monday 00:00" for weekly)
+- `{remaining}` - Trades remaining for the player
+- `{max}` - Maximum trades allowed
+- `{player}` - Player's name
 
 **Tip:** Set any message to `""` (empty string) to disable it.
 
+### Action Bar Messages
+
+Control where each message type appears using the `message_display` section in `config.yml`:
+
+```yaml
+message_display:
+  trade_limit_reached: chat        # "chat" or "action_bar"
+  trades_remaining: action_bar
+  cooldown_active: action_bar
+```
+
+## PlaceholderAPI
+
+If [PlaceholderAPI](https://github.com/PlaceholderAPI/PlaceholderAPI) is installed, the following placeholders are available for use in scoreboards, holograms, tab lists, etc.
+
+**Format:** `%ssc_<action>_<shop>:<trade>%`
+
+The `<shop>` identifier can be either the shop ID (from trades.yml) or the display name (case-insensitive).
+
+| Placeholder | Description | Example Output |
+|-------------|-------------|----------------|
+| `%ssc_remaining_Miner:diamond_trade%` | Remaining trades | `3` |
+| `%ssc_used_Miner:diamond_trade%` | Used trades | `1` |
+| `%ssc_max_Miner:diamond_trade%` | Max trades from config | `4` |
+| `%ssc_cooldown_Miner:diamond_trade%` | Time until reset or "Ready" | `23h 45m` |
+| `%ssc_resettime_Miner:diamond_trade%` | Reset time display | `00:00` |
+
 ## Commands
 
-All commands use the `/ssc` base (aliases: `/shopkeepersstock`, `/stockcontrol`)
+All commands use the `/ssc` base (aliases: `/shopkeepersstock`, `/stockcontrol`).
+
+Shop arguments accept **display names** (tab-completable) or shop IDs.
 
 | Command | Description | Permission |
 |---------|-------------|------------|
 | `/ssc reload` | Reload configuration | `shopkeepersstock.admin` |
 | `/ssc reset <player> [shop] [trade]` | Reset player's trades | `shopkeepersstock.admin` |
 | `/ssc check <player> [shop] [trade]` | Check player's trade data | `shopkeepersstock.admin` |
+| `/ssc info <shop>` | Show shop configuration details | `shopkeepersstock.admin` |
 | `/ssc debug` | Toggle debug mode | `shopkeepersstock.admin` |
 | `/ssc cleanup` | Manually trigger cleanup | `shopkeepersstock.admin` |
 | `/ssc help` | Show command help | `shopkeepersstock.admin` |
@@ -127,14 +196,17 @@ All commands use the `/ssc` base (aliases: `/shopkeepersstock`, `/stockcontrol`)
 # Reset all trades for Notch
 /ssc reset Notch
 
-# Reset only diamond trades for Notch in the miner shop
-/ssc reset Notch e8f4a3c2-1234-5678-9abc-def012345678 diamond_trade
+# Reset only diamond trades for Notch in the Miner shop (by display name)
+/ssc reset Notch Miner diamond_trade
 
 # Check all trade data for Notch
 /ssc check Notch
 
 # Check Notch's trades in a specific shop
-/ssc check Notch e8f4a3c2-1234-5678-9abc-def012345678
+/ssc check Notch Miner
+
+# Inspect a shop's configuration
+/ssc info Miner
 ```
 
 ## Permissions
@@ -146,19 +218,19 @@ All commands use the `/ssc` base (aliases: `/shopkeepersstock`, `/stockcontrol`)
 
 ## How It Works
 
-1. **Player opens Shopkeeper** → Plugin caches the player-shop mapping
-2. **Server sends trade offers** → Plugin intercepts the packet via PacketEvents
-3. **Plugin modifies stock** → Shows player's personal remaining trades
-4. **Player trades** → Plugin validates limits and records the trade
-5. **Stock updates** → Client automatically shows updated numbers
-6. **Cooldown expires** → Trades reset automatically
+1. **Player opens Shopkeeper** - Plugin caches the player-shop mapping
+2. **Server sends trade offers** - Plugin intercepts the packet via PacketEvents
+3. **Plugin modifies stock** - Shows player's personal remaining trades
+4. **Player trades** - Plugin validates limits and records the trade
+5. **Stock updates** - Client automatically shows updated numbers
+6. **Cooldown expires** - Trades reset automatically (daily/weekly at fixed time, rolling after duration)
 
 ### Trade Key System
 
 The plugin uses **stable trade keys** (not slot numbers) to track trades. This means:
-- ✅ You can reorder trades in Shopkeepers without breaking player data
-- ✅ Trade history persists even if you change the villager UI layout
-- ✅ Just update the `slot:` number in trades.yml when reordering
+- You can reorder trades in Shopkeepers without breaking player data
+- Trade history persists even if you change the villager UI layout
+- Just update the `slot:` number in trades.yml when reordering
 
 ## Troubleshooting
 
@@ -207,7 +279,7 @@ cd ShopkeepersStockControl
 ./gradlew clean build
 ```
 
-JAR will be in `build/libs/ShopkeepersStockControl-1.0.0-all.jar`
+JAR will be in `build/libs/ShopkeepersStockControl-<version>.jar`
 
 **Note**: All dependencies (including Shopkeepers API) are automatically downloaded via Maven during the build. At runtime, Shopkeepers and PacketEvents must be installed as separate plugins on your server.
 
@@ -217,21 +289,28 @@ JAR will be in `build/libs/ShopkeepersStockControl-1.0.0-all.jar`
 ShopkeepersStockControl/
 ├── src/main/java/dev/oakheart/stockcontrol/
 │   ├── ShopkeepersStockControl.java  # Main plugin class
-│   ├── managers/                      # Business logic layer
+│   ├── commands/
+│   │   └── StockControlCommand.java  # Command handling & tab completion
+│   ├── config/
+│   │   ├── ConfigManager.java        # Config loading & validation
+│   │   └── Messages.java             # Message key constants
+│   ├── data/
+│   │   ├── DataStore.java            # Storage interface
+│   │   ├── SQLiteDataStore.java      # SQLite implementation
+│   │   ├── PlayerTradeData.java      # Player trade state
+│   │   ├── ShopConfig.java           # Shop configuration model
+│   │   ├── TradeConfig.java          # Trade configuration model
+│   │   ├── ShopContext.java           # Player-shop session context
+│   │   └── CooldownMode.java         # Daily/weekly/rolling enum
+│   ├── listeners/
+│   │   ├── ShopkeepersListener.java  # Trade validation & feedback
+│   │   └── PacketListener.java       # Merchant packet interception
+│   ├── managers/
 │   │   ├── TradeDataManager.java     # Trade tracking & cooldowns
-│   │   ├── PacketManager.java        # Packet interception
-│   │   └── CooldownManager.java      # Automatic cleanup
-│   ├── listeners/                     # Event handlers
-│   │   ├── ShopkeepersListener.java  # Trade validation
-│   │   └── PacketListener.java       # Packet modification
-│   ├── data/                          # Data layer
-│   │   ├── SQLiteDataStore.java      # Database operations
-│   │   └── PlayerTradeData.java      # Data models
-│   ├── config/                        # Configuration
-│   │   ├── ConfigManager.java
-│   │   └── Messages.java             # Message constants
-│   └── commands/                      # Command handlers
-│       └── StockControlCommand.java
+│   │   ├── PacketManager.java        # Packet modification logic
+│   │   └── CooldownManager.java      # Periodic cleanup
+│   └── placeholders/
+│       └── StockControlExpansion.java # PlaceholderAPI integration
 └── src/main/resources/
     ├── config.yml                     # Main configuration
     ├── trades.yml                     # Trade limits config
@@ -259,17 +338,28 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Credits
 
 - **Author**: [Loralon](https://github.com/LoralonMC)
-- **Dependencies**: [Shopkeepers](https://github.com/Shopkeepers/Shopkeepers), [PacketEvents](https://github.com/retrooper/packetevents)
+- **Dependencies**: [Shopkeepers](https://github.com/Shopkeepers/Shopkeepers), [PacketEvents](https://github.com/retrooper/packetevents), [PlaceholderAPI](https://github.com/PlaceholderAPI/PlaceholderAPI) (optional)
 - **Metrics**: [bStats](https://bstats.org/)
 
 ## Changelog
 
-### v1.0.0 (Initial Release)
-- ✨ Per-player trade limits with configurable cooldowns
-- 📊 Real-time stock display in villager UI
-- 💾 SQLite database with automatic persistence
-- 🎨 MiniMessage support for custom messages
-- 🔧 Full command suite for administration
-- 📈 bStats metrics integration
-- 🐛 Thread-safe packet modification
-- ⚡ Optimized with caching and batch writes
+### v1.1.0
+- Per-trade cooldown mode overrides (daily/weekly/rolling with shop-level fallback)
+- PlaceholderAPI expansion (`%ssc_remaining_<shop>:<trade>%`, etc.)
+- Tab completion uses display names instead of UUIDs
+- `/ssc info <shop>` command for in-game config inspection
+- Action bar message support (configurable per message type)
+- Cooldown field now optional for daily/weekly modes
+- Orphaned shop data auto-cleanup on `/ssc reload`
+- Fix single-trade slot matching bug
+- Remove dead code and stale comments
+
+### v1.0.0
+- Per-player trade limits with configurable cooldowns
+- Real-time stock display in villager UI
+- SQLite database with automatic persistence
+- MiniMessage support for custom messages
+- Full command suite for administration
+- bStats metrics integration
+- Thread-safe packet modification
+- Optimized with caching and batch writes
