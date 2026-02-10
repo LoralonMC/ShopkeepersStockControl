@@ -19,7 +19,7 @@ public class ConfigManager {
     private final ShopkeepersStockControl plugin;
     private FileConfiguration config;
     private FileConfiguration tradesConfig;
-    private Map<String, ShopConfig> shops;
+    private volatile Map<String, ShopConfig> shops;
 
     public ConfigManager(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
@@ -279,7 +279,7 @@ public class ConfigManager {
     }
 
     public String getMessage(String key) {
-        return config.getString("messages." + key, "&cMessage not found: " + key);
+        return config.getString("messages." + key, "<red>Message not found: " + key);
     }
 
     public Map<String, ShopConfig> getShops() {

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'dev.oakheart'
-version = '1.0.0'
+version = '1.1.0'
 
 repositories {
     mavenCentral()
@@ -38,11 +38,6 @@ repositories {
     maven {
         name = 'jitpack'
         url = 'https://jitpack.io'
-    }
-
-    maven {
-        name = 'CodeMC'
-        url = 'https://repo.codemc.io/repository/maven-public/'
     }
 
     // Shopkeepers API

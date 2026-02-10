@@ -10,9 +10,9 @@ public class PlayerTradeData {
     private final UUID playerId;
     private final String shopId;
     private final String tradeKey;         // Stable identifier (e.g., "diamond_trade")
-    private int tradesUsed;
-    private long lastResetEpoch;           // Timestamp when cooldown started (limit reached)
-    private int cooldownSeconds;           // Cooldown duration from config
+    private volatile int tradesUsed;
+    private volatile long lastResetEpoch;           // Timestamp when cooldown started (limit reached)
+    private volatile int cooldownSeconds;           // Cooldown duration from config
 
     /**
      * Creates a new PlayerTradeData instance.

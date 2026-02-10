@@ -9,7 +9,6 @@ import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.listeners.PacketListener;
 import org.bukkit.entity.Player;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -111,7 +110,7 @@ public class PacketManager {
 
     /**
      * Gets the shop context for a player.
-     * Automatically removes expired contexts.
+     * Automatically removes expired contexts and refreshes TTL on active ones.
      *
      * @param playerId The player's UUID
      * @return ShopContext or null if not found or expired
@@ -126,7 +125,10 @@ public class PacketManager {
                 }
                 return null; // Returning null removes the entry atomically
             }
-            return context; // Keep the entry
+            // Refresh TTL to keep mapping alive while trading window is open
+            long cacheTTL = plugin.getConfigManager().getCacheTTL();
+            long newExpiry = System.currentTimeMillis() + (cacheTTL * 1000L);
+            return new ShopContext(context.shopId(), context.entityId(), newExpiry);
         });
     }
 
@@ -200,107 +202,6 @@ public class PacketManager {
         }
 
         // Note: We modified the offers in-place, so they're already updated in the packet
-    }
-
-    /**
-     * Refreshes the merchant offers for a player by sending a new MERCHANT_OFFERS packet.
-     * This updates the visual stock display immediately after a trade.
-     *
-     * @param player The player whose trading offers should be refreshed
-     * @param shopkeeper The shopkeeper whose trading window is open
-     */
-    public void refreshMerchantOffers(Player player, com.nisovin.shopkeepers.api.shopkeeper.Shopkeeper shopkeeper) {
-        if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("Scheduling merchant offers refresh for " + player.getName());
-        }
-
-        // Schedule for next tick to ensure trade completes first
-        org.bukkit.Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            try {
-                // Verify player still has merchant window open
-                if (player.getOpenInventory().getTopInventory().getType() != org.bukkit.event.inventory.InventoryType.MERCHANT) {
-                    return;
-                }
-
-                ShopContext context = getShopContext(player.getUniqueId());
-                if (context == null) {
-                    return;
-                }
-
-                String shopId = context.shopId();
-                ShopConfig shopConfig = plugin.getConfigManager().getShop(shopId);
-                if (shopConfig == null || !shopConfig.isEnabled()) {
-                    return;
-                }
-
-                // Get the merchant inventory to read current container ID
-                var merchantInv = (org.bukkit.inventory.MerchantInventory) player.getOpenInventory().getTopInventory();
-
-                // Get trading recipes from shopkeeper
-                var recipes = shopkeeper.getTradingRecipes(player);
-                if (recipes == null || recipes.isEmpty()) {
-                    return;
-                }
-
-                // Build list of offers with updated stock
-                var offers = new java.util.ArrayList<>();
-                Map<Integer, TradeConfig> slotMap = shopConfig.getTradesBySlot();
-
-                for (int slot = 0; slot < recipes.size(); slot++) {
-                    var recipe = recipes.get(slot);
-                    TradeConfig tradeConfig = slotMap.get(slot);
-
-                    // Determine stock for this slot
-                    int uses, maxUses;
-                    if (tradeConfig != null) {
-                        int remaining = tradeDataManager.getRemainingTrades(player.getUniqueId(), shopId, tradeConfig.getTradeKey());
-                        int maxTrades = tradeConfig.getMaxTrades();
-
-                        if (remaining == 0) {
-                            // Crossed out
-                            uses = maxTrades;
-                            maxUses = maxTrades;
-                        } else {
-                            // Unlimited appearance
-                            uses = 0;
-                            maxUses = 999;
-                        }
-                    } else {
-                        // Not tracked
-                        uses = 0;
-                        maxUses = 999;
-                    }
-
-                    // Create offer using reflection to access merchant recipe internals
-                    // We'll use the existing recipe's items
-                    var offer = new Object() {
-                        public int getUses() { return uses; }
-                        public int getMaxUses() { return maxUses; }
-                        public Object getResult() { return recipe.getResultItem(); }
-                        public Object getIngredient1() { return recipe.getItem1(); }
-                        public Object getIngredient2() { return recipe.getItem2(); }
-                    };
-
-                    offers.add(offer);
-                }
-
-                // Unfortunately, we need the exact packet structure which requires deep PacketEvents knowledge
-                // For now, let's just close and reopen instantly (single tick = 50ms flicker)
-                player.closeInventory();
-                org.bukkit.Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                    shopkeeper.openTradingWindow(player);
-                    if (plugin.getConfigManager().isDebugMode()) {
-                        plugin.getLogger().info("Refreshed merchant window for " + player.getName());
-                    }
-                }, 1L);
-
-            } catch (Exception e) {
-                if (plugin.getConfigManager().isDebugMode()) {
-                    plugin.getLogger().warning("Error refreshing merchant offers: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-        }, 2L); // 2 tick delay
     }
 
     /**

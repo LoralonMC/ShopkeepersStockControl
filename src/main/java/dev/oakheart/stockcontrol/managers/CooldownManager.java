@@ -1,29 +1,23 @@
 package dev.oakheart.stockcontrol.managers;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
-import dev.oakheart.stockcontrol.listeners.ShopkeepersListener;
 import org.bukkit.Bukkit;
 import org.bukkit.scheduler.BukkitTask;
 
 /**
  * Manages periodic cleanup of expired cooldowns and cached data.
  * Helps keep memory usage efficient by removing stale entries.
- *
- * PHASE 5 - COOLDOWN MANAGER
  */
 public class CooldownManager {
 
     private final ShopkeepersStockControl plugin;
     private final TradeDataManager tradeDataManager;
-    private final ShopkeepersListener shopkeepersListener;
 
     private BukkitTask cleanupTask;
 
-    public CooldownManager(ShopkeepersStockControl plugin, TradeDataManager tradeDataManager,
-                           ShopkeepersListener shopkeepersListener) {
+    public CooldownManager(ShopkeepersStockControl plugin, TradeDataManager tradeDataManager) {
         this.plugin = plugin;
         this.tradeDataManager = tradeDataManager;
-        this.shopkeepersListener = shopkeepersListener;
     }
 
     /**
@@ -68,9 +62,6 @@ public class CooldownManager {
             // Clean up expired trade cooldowns from cache
             int cleanedCooldowns = tradeDataManager.cleanupExpiredCooldowns();
 
-            // Clean up anti-spam cache from listener
-            shopkeepersListener.cleanupSpamCache();
-
             // Log statistics if anything was cleaned up
             if (cleanedCooldowns > 0 || plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("Cleanup complete: " + cleanedCooldowns + " expired cooldowns removed");
@@ -92,7 +83,6 @@ public class CooldownManager {
     public int triggerManualCleanup() {
         plugin.getLogger().info("Manual cleanup triggered");
         int cleaned = tradeDataManager.cleanupExpiredCooldowns();
-        shopkeepersListener.cleanupSpamCache();
         plugin.getLogger().info("Manual cleanup complete: " + cleaned + " entries removed");
         return cleaned;
     }

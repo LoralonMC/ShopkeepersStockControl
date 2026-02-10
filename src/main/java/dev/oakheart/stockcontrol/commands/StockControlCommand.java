@@ -3,8 +3,11 @@ package dev.oakheart.stockcontrol.commands;
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.data.PlayerTradeData;
 import dev.oakheart.stockcontrol.data.ShopConfig;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -16,8 +19,6 @@ import java.util.stream.Collectors;
 
 /**
  * Command executor for /ssc (ShopkeepersStockControl) command.
- *
- * PHASE 6 - COMMANDS
  */
 public class StockControlCommand implements CommandExecutor, TabCompleter {
 
@@ -58,10 +59,32 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                 return true;
 
             default:
-                sender.sendMessage(miniMessage.deserialize("<red>Unknown subcommand: " + subcommand));
+                sender.sendMessage(miniMessage.deserialize(
+                        "<red>Unknown subcommand: <white><input>",
+                        Placeholder.unparsed("input", subcommand)));
                 sender.sendMessage(miniMessage.deserialize("<yellow>Use /ssc help for a list of commands"));
                 return true;
         }
+    }
+
+    /**
+     * Resolves a player name to a UUID, checking online players first then offline.
+     *
+     * @param playerName The player name to resolve
+     * @return The player's UUID, or null if never played before
+     */
+    private UUID resolvePlayerUUID(String playerName) {
+        Player online = Bukkit.getPlayer(playerName);
+        if (online != null) {
+            return online.getUniqueId();
+        }
+
+        OfflinePlayer offline = Bukkit.getOfflinePlayer(playerName);
+        if (offline.hasPlayedBefore() || offline.isOnline()) {
+            return offline.getUniqueId();
+        }
+
+        return null;
     }
 
     /**
@@ -101,25 +124,21 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         }
 
         String playerName = args[1];
-        Player target = Bukkit.getPlayer(playerName);
-        UUID playerId = null;
+        UUID playerId = resolvePlayerUUID(playerName);
 
-        if (target != null) {
-            playerId = target.getUniqueId();
-        } else {
-            // Try to find offline player
-            try {
-                playerId = Bukkit.getOfflinePlayer(playerName).getUniqueId();
-            } catch (Exception e) {
-                sender.sendMessage(miniMessage.deserialize("<red>Player not found: " + playerName));
-                return true;
-            }
+        if (playerId == null) {
+            sender.sendMessage(miniMessage.deserialize(
+                    "<red>Player not found: <white><player>",
+                    Placeholder.unparsed("player", playerName)));
+            return true;
         }
 
         // Reset all trades for player
         if (args.length == 2) {
             plugin.getTradeDataManager().resetPlayerTrades(playerId);
-            sender.sendMessage(miniMessage.deserialize("<green>Reset all trades for player " + playerName));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<green>Reset all trades for player <white><player>",
+                    Placeholder.unparsed("player", playerName)));
             return true;
         }
 
@@ -138,14 +157,22 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                 }
             }
 
-            sender.sendMessage(miniMessage.deserialize("<green>Reset " + resetCount + " trades for player " + playerName + " in shop " + shopId));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<green>Reset <white><count></white> trades for player <white><player></white> in shop <white><shop>",
+                    Placeholder.unparsed("count", String.valueOf(resetCount)),
+                    Placeholder.unparsed("player", playerName),
+                    Placeholder.unparsed("shop", shopId)));
             return true;
         }
 
         // Reset specific trade
         String tradeKey = args[3];
         plugin.getTradeDataManager().resetPlayerTrade(playerId, shopId, tradeKey);
-        sender.sendMessage(miniMessage.deserialize("<green>Reset trade " + tradeKey + " for player " + playerName + " in shop " + shopId));
+        sender.sendMessage(miniMessage.deserialize(
+                "<green>Reset trade <white><trade></white> for player <white><player></white> in shop <white><shop>",
+                Placeholder.unparsed("trade", tradeKey),
+                Placeholder.unparsed("player", playerName),
+                Placeholder.unparsed("shop", shopId)));
 
         return true;
     }
@@ -165,19 +192,13 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         }
 
         String playerName = args[1];
-        Player target = Bukkit.getPlayer(playerName);
-        UUID playerId = null;
+        UUID playerId = resolvePlayerUUID(playerName);
 
-        if (target != null) {
-            playerId = target.getUniqueId();
-        } else {
-            // Try to find offline player
-            try {
-                playerId = Bukkit.getOfflinePlayer(playerName).getUniqueId();
-            } catch (Exception e) {
-                sender.sendMessage(miniMessage.deserialize("<red>Player not found: " + playerName));
-                return true;
-            }
+        if (playerId == null) {
+            sender.sendMessage(miniMessage.deserialize(
+                    "<red>Player not found: <white><player>",
+                    Placeholder.unparsed("player", playerName)));
+            return true;
         }
 
         // Flush any pending writes for this player to ensure we get the latest data
@@ -186,7 +207,9 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
         List<PlayerTradeData> playerTrades = plugin.getTradeDataManager().getPlayerTrades(playerId);
 
         if (playerTrades.isEmpty()) {
-            sender.sendMessage(miniMessage.deserialize("<yellow>Player " + playerName + " has no trade data"));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<yellow>Player <white><player></white> has no trade data",
+                    Placeholder.unparsed("player", playerName)));
             return true;
         }
 
@@ -198,7 +221,10 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                     .collect(Collectors.toList());
 
             if (playerTrades.isEmpty()) {
-                sender.sendMessage(miniMessage.deserialize("<yellow>Player " + playerName + " has no trades in shop " + shopId));
+                sender.sendMessage(miniMessage.deserialize(
+                        "<yellow>Player <white><player></white> has no trades in shop <white><shop>",
+                        Placeholder.unparsed("player", playerName),
+                        Placeholder.unparsed("shop", shopId)));
                 return true;
             }
         }
@@ -211,13 +237,18 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                     .collect(Collectors.toList());
 
             if (playerTrades.isEmpty()) {
-                sender.sendMessage(miniMessage.deserialize("<yellow>Player " + playerName + " has no data for trade " + tradeKey));
+                sender.sendMessage(miniMessage.deserialize(
+                        "<yellow>Player <white><player></white> has no data for trade <white><trade>",
+                        Placeholder.unparsed("player", playerName),
+                        Placeholder.unparsed("trade", tradeKey)));
                 return true;
             }
         }
 
         // Display trade data
-        sender.sendMessage(miniMessage.deserialize("<green>=== Trade data for " + playerName + " ==="));
+        sender.sendMessage(miniMessage.deserialize(
+                "<green>=== Trade data for <white><player></white> ===",
+                Placeholder.unparsed("player", playerName)));
 
         for (PlayerTradeData data : playerTrades) {
             int remaining = plugin.getTradeDataManager().getRemainingTrades(playerId, data.getShopId(), data.getTradeKey());
@@ -234,10 +265,19 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
             // Show accurate "Used" count - if cooldown expired, it's effectively 0
             int usedCount = cooldownExpired ? 0 : data.getTradesUsed();
 
-            sender.sendMessage(miniMessage.deserialize("<aqua>Shop: <white>" + shopName));
-            sender.sendMessage(miniMessage.deserialize("<aqua>  Trade: <white>" + data.getTradeKey()));
-            sender.sendMessage(miniMessage.deserialize("<aqua>  Used: <white>" + usedCount + "/" + maxTrades));
-            sender.sendMessage(miniMessage.deserialize("<aqua>  Remaining: <white>" + remaining));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<aqua>Shop: <white><shop>",
+                    Placeholder.unparsed("shop", shopName)));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<aqua>  Trade: <white><trade>",
+                    Placeholder.unparsed("trade", data.getTradeKey())));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<aqua>  Used: <white><used>/<max>",
+                    Placeholder.unparsed("used", String.valueOf(usedCount)),
+                    Placeholder.unparsed("max", String.valueOf(maxTrades))));
+            sender.sendMessage(miniMessage.deserialize(
+                    "<aqua>  Remaining: <white><remaining>",
+                    Placeholder.unparsed("remaining", String.valueOf(remaining))));
 
             if (timeRemaining > 0) {
                 String resetInfo = plugin.getTradeDataManager().formatDuration(timeRemaining);
@@ -245,7 +285,9 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
                 if (!resetTime.isEmpty()) {
                     resetInfo += " (Resets at " + resetTime + ")";
                 }
-                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <white>" + resetInfo));
+                sender.sendMessage(miniMessage.deserialize(
+                        "<aqua>  Cooldown: <white><cooldown>",
+                        Placeholder.unparsed("cooldown", resetInfo)));
             } else {
                 sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <green>Ready"));
             }
@@ -293,7 +335,9 @@ public class StockControlCommand implements CommandExecutor, TabCompleter {
 
         int cleaned = plugin.getCooldownManager().triggerManualCleanup();
 
-        sender.sendMessage(miniMessage.deserialize("<green>Cleanup complete! Removed " + cleaned + " expired entries"));
+        sender.sendMessage(miniMessage.deserialize(
+                "<green>Cleanup complete! Removed <white><count></white> expired entries",
+                Placeholder.unparsed("count", String.valueOf(cleaned))));
 
         return true;
     }

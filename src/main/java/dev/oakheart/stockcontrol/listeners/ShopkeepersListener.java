@@ -24,9 +24,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
  * Listens for Shopkeepers events to track shop openings and validate trades.
  * Manages the critical player -> shop mapping for packet modification.
@@ -65,6 +62,9 @@ public class ShopkeepersListener implements Listener {
 
         // Add to cache for packet modification
         packetManager.addShopMapping(player.getUniqueId(), shopId, entityId);
+
+        // Pre-load trade data into cache so the packet thread never hits the database
+        tradeDataManager.preloadShopData(player.getUniqueId(), shopId);
 
         if (plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info(player.getName() + " opened shop: " + shopId);
@@ -288,70 +288,41 @@ public class ShopkeepersListener implements Listener {
     }
 
     /**
-     * Cleans up any cached data periodically.
-     * Currently a no-op since anti-spam was removed to support shift-clicking.
-     */
-    public void cleanupSpamCache() {
-        // No-op: Anti-spam removed to allow shift-click trades
-    }
-
-    /**
      * Compares two items for equality (null-safe).
-     * Uses Shopkeepers' UnmodifiableItemStack API.
+     * Uses Shopkeepers' UnmodifiableItemStack API with isSimilar() for full comparison
+     * including type, amount, and item meta/NBT data.
      *
      * @param item1 First item (can be null)
      * @param item2 Second item (can be null)
-     * @return true if both are null or both have same type and amount
+     * @return true if both are null or both represent the same item
      */
     private boolean itemsEqual(Object item1, Object item2) {
         // Both null
         if (item1 == null && item2 == null) {
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("      itemsEqual: both null = true");
-            }
             return true;
         }
         // One null, one not
         if (item1 == null || item2 == null) {
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("      itemsEqual: one null = false");
-            }
             return false;
         }
 
         // Use Shopkeepers' UnmodifiableItemStack
-        if (!(item1 instanceof UnmodifiableItemStack) ||
-            !(item2 instanceof UnmodifiableItemStack)) {
+        if (!(item1 instanceof UnmodifiableItemStack stack1) ||
+            !(item2 instanceof UnmodifiableItemStack stack2)) {
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("      itemsEqual: not UnmodifiableItemStack instances = false");
-                plugin.getLogger().info("        item1 class: " + item1.getClass().getName());
-                plugin.getLogger().info("        item2 class: " + item2.getClass().getName());
             }
             return false;
         }
 
-        UnmodifiableItemStack stack1 = (UnmodifiableItemStack) item1;
-        UnmodifiableItemStack stack2 = (UnmodifiableItemStack) item2;
+        // Use isSimilar for full comparison (type, amount, and meta/NBT)
+        boolean match = stack1.isSimilar(stack2) && stack1.getAmount() == stack2.getAmount();
 
-        // Compare type and amount
-        if (stack1.getType() != stack2.getType()) {
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("      itemsEqual: type mismatch = false (" + stack1.getType() + " vs " + stack2.getType() + ")");
-            }
-            return false;
-        }
-        if (stack1.getAmount() != stack2.getAmount()) {
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("      itemsEqual: amount mismatch = false (" + stack1.getAmount() + " vs " + stack2.getAmount() + ")");
-            }
-            return false;
-        }
-
-        // For our purposes, type and amount are enough
         if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("      itemsEqual: MATCH = true (" + stack1.getType() + " x" + stack1.getAmount() + ")");
+            plugin.getLogger().info("      itemsEqual: " + stack1.getType() + " x" + stack1.getAmount() +
+                    " vs " + stack2.getType() + " x" + stack2.getAmount() + " = " + match);
         }
-        return true;
+        return match;
     }
 
 }

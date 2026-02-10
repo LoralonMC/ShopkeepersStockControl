@@ -96,15 +96,12 @@ public class SQLiteDataStore implements DataStore {
                 ON player_trades(player_uuid, shop_id);
                 """;
 
-        String createPlayerShopTradeIndexSQL = """
-                CREATE INDEX IF NOT EXISTS idx_player_shop_trade
-                ON player_trades(player_uuid, shop_id, trade_key);
-                """;
+        // Note: No separate (player_uuid, shop_id, trade_key) index needed —
+        // the UNIQUE constraint already creates an equivalent index.
 
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createTableSQL);
             stmt.execute(createPlayerShopIndexSQL);
-            stmt.execute(createPlayerShopTradeIndexSQL);
         }
 
         plugin.getLogger().info("Database tables created/verified successfully");
@@ -162,7 +159,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public PlayerTradeData loadTradeData(UUID playerId, String shopId, String tradeKey) {
+    public synchronized PlayerTradeData loadTradeData(UUID playerId, String shopId, String tradeKey) {
         if (!operational) return null;
 
         try {
@@ -183,7 +180,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public List<PlayerTradeData> loadPlayerData(UUID playerId) {
+    public synchronized List<PlayerTradeData> loadPlayerData(UUID playerId) {
         List<PlayerTradeData> result = new ArrayList<>();
         if (!operational) return result;
 
@@ -203,7 +200,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public List<PlayerTradeData> loadShopData(String shopId) {
+    public synchronized List<PlayerTradeData> loadShopData(String shopId) {
         List<PlayerTradeData> result = new ArrayList<>();
         if (!operational) return result;
 
@@ -223,7 +220,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public void saveTradeData(PlayerTradeData data) {
+    public synchronized void saveTradeData(PlayerTradeData data) {
         if (!operational) return;
 
         try {
@@ -242,7 +239,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public void batchSaveTradeData(List<PlayerTradeData> dataList) {
+    public synchronized void batchSaveTradeData(List<PlayerTradeData> dataList) {
         if (!operational || dataList.isEmpty()) return;
 
         try {
@@ -278,7 +275,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public void deleteTradeData(UUID playerId, String shopId, String tradeKey) {
+    public synchronized void deleteTradeData(UUID playerId, String shopId, String tradeKey) {
         if (!operational) return;
 
         try {
@@ -292,7 +289,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public void deletePlayerData(UUID playerId) {
+    public synchronized void deletePlayerData(UUID playerId) {
         if (!operational) return;
 
         try {
@@ -305,7 +302,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public void deletePlayerShopData(UUID playerId, String shopId) {
+    public synchronized void deletePlayerShopData(UUID playerId, String shopId) {
         if (!operational) return;
 
         try {
@@ -318,7 +315,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public List<UUID> getAllPlayers() {
+    public synchronized List<UUID> getAllPlayers() {
         List<UUID> result = new ArrayList<>();
         if (!operational) return result;
 
@@ -344,7 +341,7 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         try {
             // Close prepared statements
             if (loadTradeStmt != null) loadTradeStmt.close();

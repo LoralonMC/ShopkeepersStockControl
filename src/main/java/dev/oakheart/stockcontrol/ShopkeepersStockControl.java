@@ -1,7 +1,5 @@
 package dev.oakheart.stockcontrol;
 
-import com.github.retrooper.packetevents.PacketEvents;
-import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import dev.oakheart.stockcontrol.commands.StockControlCommand;
 import dev.oakheart.stockcontrol.config.ConfigManager;
 import dev.oakheart.stockcontrol.data.DataStore;
@@ -29,24 +27,6 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
     private PacketManager packetManager;
     private ShopkeepersListener shopkeepersListener;
     private CooldownManager cooldownManager;
-
-    @Override
-    public void onLoad() {
-        // Initialize PacketEvents (must be done in onLoad)
-        // Uses the server's installed PacketEvents plugin (2.10.0+)
-        try {
-            PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
-            PacketEvents.getAPI().getSettings()
-                    .reEncodeByDefault(false)
-                    .checkForUpdates(false)
-                    .bStats(false);
-            PacketEvents.getAPI().load();
-            getLogger().info("PacketEvents loaded successfully");
-        } catch (Exception e) {
-            getLogger().warning("Failed to load PacketEvents: " + e.getMessage());
-            getLogger().warning("UI stock display will be disabled");
-        }
-    }
 
     @Override
     public void onEnable() {
@@ -88,16 +68,6 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
             return;
         }
 
-        // Initialize PacketEvents (Phase 3)
-        // Uses the server's PacketEvents plugin
-        try {
-            PacketEvents.getAPI().init();
-            getLogger().info("PacketEvents initialized successfully");
-        } catch (Exception e) {
-            getLogger().warning("Failed to initialize PacketEvents: " + e.getMessage());
-            getLogger().warning("UI stock display will be disabled, but trade limits will still work");
-        }
-
         // Initialize packet layer (Phase 3)
         try {
             packetManager = new PacketManager(this, tradeDataManager);
@@ -119,7 +89,7 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
 
         // Initialize cooldown manager (Phase 5)
         try {
-            cooldownManager = new CooldownManager(this, tradeDataManager, shopkeepersListener);
+            cooldownManager = new CooldownManager(this, tradeDataManager);
             cooldownManager.initialize();
         } catch (Exception e) {
             getLogger().severe("Failed to initialize cooldown manager: " + e.getMessage());
@@ -160,16 +130,6 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
             packetManager.shutdown();
         }
 
-        // Terminate PacketEvents
-        try {
-            if (PacketEvents.getAPI() != null) {
-                PacketEvents.getAPI().terminate();
-                getLogger().info("PacketEvents terminated");
-            }
-        } catch (Exception e) {
-            // Ignore - PacketEvents might not have been initialized
-        }
-
         // Phase 2 - Shutdown data layer
         if (tradeDataManager != null) {
             tradeDataManager.shutdown();
@@ -179,6 +139,7 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
             dataStore.close();
         }
 
+        instance = null;
         getLogger().info("ShopkeepersStockControl disabled successfully!");
     }
 
@@ -208,16 +169,6 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
     }
 
     /**
-     * Initializes the packet layer (PacketManager).
-     */
-    private void initializePacketLayer() {
-        packetManager = new PacketManager(this, tradeDataManager);
-        packetManager.initialize();
-
-        getLogger().info("Packet layer initialized successfully");
-    }
-
-    /**
      * Handles player quit events to evict cache and flush data.
      */
     @EventHandler
@@ -244,7 +195,13 @@ public final class ShopkeepersStockControl extends JavaPlugin implements Listene
                     getServer().getPluginManager().getPlugin("Shopkeepers").getDescription().getVersion());
         }
 
-        // PacketEvents will be shaded into the plugin, so no need to check for it as a plugin
+        // PacketEvents is a soft-depend — check but don't require
+        if (getServer().getPluginManager().getPlugin("PacketEvents") == null) {
+            getLogger().warning("PacketEvents plugin not found! UI stock display will be disabled.");
+        } else {
+            getLogger().info("PacketEvents detected: " +
+                    getServer().getPluginManager().getPlugin("PacketEvents").getDescription().getVersion());
+        }
 
         return allPresent;
     }

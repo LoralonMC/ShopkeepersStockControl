@@ -162,15 +162,13 @@ public class TradeDataManager {
         // Increment usage
         data.setTradesUsed(data.getTradesUsed() + 1);
 
-        // If limit just reached, start cooldown timer
-        int limit = getTradeLimit(shopId, tradeKey);
-        if (data.getTradesUsed() >= limit) {
-            data.setLastResetEpoch(now); // Cooldown starts NOW
-        }
+        // lastResetEpoch stays at creation time (first trade) — the rolling cooldown
+        // window always starts from the first trade, not from when the limit is hit.
 
         markDirty(data.getCacheKey());
 
         if (plugin.getConfigManager().isDebugMode()) {
+            int limit = getTradeLimit(shopId, tradeKey);
             plugin.getLogger().info("Recorded trade for " + playerId + " at " + shopId + ":" + tradeKey +
                     " (used: " + data.getTradesUsed() + "/" + limit + ")");
         }
@@ -342,6 +340,32 @@ public class TradeDataManager {
     }
 
     /**
+     * Pre-loads all trade data for a player+shop into cache.
+     * Called on shop open (main thread) to ensure the packet thread never hits the database.
+     *
+     * @param playerId The player's UUID
+     * @param shopId   The shop identifier
+     */
+    public void preloadShopData(UUID playerId, String shopId) {
+        ShopConfig shopConfig = plugin.getConfigManager().getShop(shopId);
+        if (shopConfig == null) return;
+
+        for (TradeConfig trade : shopConfig.getTrades().values()) {
+            String cacheKey = buildCacheKey(playerId, shopId, trade.getTradeKey());
+            if (!tradeCache.containsKey(cacheKey)) {
+                PlayerTradeData data = dataStore.loadTradeData(playerId, shopId, trade.getTradeKey());
+                if (data != null) {
+                    tradeCache.put(cacheKey, data);
+                }
+            }
+        }
+
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("Pre-loaded trade data for " + playerId + " in shop " + shopId);
+        }
+    }
+
+    /**
      * Evicts a player's data from cache (e.g., on player quit).
      *
      * @param playerId The player's UUID
@@ -464,15 +488,16 @@ public class TradeDataManager {
 
     /**
      * Flushes dirty data to database asynchronously.
+     * Uses atomic per-key removal to prevent race conditions with concurrent markDirty() calls.
      */
     private void flushDirtyData() {
         if (dirtyKeys.isEmpty()) return;
 
-        Set<String> toFlush = new HashSet<>(dirtyKeys);
-        dirtyKeys.removeAll(toFlush);
-
         List<PlayerTradeData> dataToSave = new ArrayList<>();
-        for (String key : toFlush) {
+        Iterator<String> it = dirtyKeys.iterator();
+        while (it.hasNext()) {
+            String key = it.next();
+            it.remove();
             PlayerTradeData data = tradeCache.get(key);
             if (data != null) {
                 dataToSave.add(data);

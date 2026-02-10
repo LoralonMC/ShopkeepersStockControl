@@ -13,6 +13,7 @@ public class ShopConfig {
     private final boolean enabled;
     private final boolean respectShopStock;
     private final Map<String, TradeConfig> trades;  // Key: tradeKey, Value: TradeConfig
+    private final Map<Integer, TradeConfig> tradesBySlot;  // Cached slot-to-trade mapping
 
     /**
      * Creates a new ShopConfig instance.
@@ -29,6 +30,13 @@ public class ShopConfig {
         this.enabled = enabled;
         this.respectShopStock = respectShopStock;
         this.trades = new HashMap<>(trades);
+
+        // Pre-compute slot map for fast lookups during packet modification
+        Map<Integer, TradeConfig> slotMap = new HashMap<>();
+        for (TradeConfig trade : trades.values()) {
+            slotMap.put(trade.getSlot(), trade);
+        }
+        this.tradesBySlot = Map.copyOf(slotMap);
     }
 
     public String getShopId() {
@@ -77,16 +85,12 @@ public class ShopConfig {
     }
 
     /**
-     * Builds a slot-to-TradeConfig mapping for quick lookups.
+     * Gets the cached slot-to-TradeConfig mapping for quick lookups.
      *
-     * @return Map of slot numbers to TradeConfig
+     * @return Unmodifiable map of slot numbers to TradeConfig
      */
     public Map<Integer, TradeConfig> getTradesBySlot() {
-        Map<Integer, TradeConfig> slotMap = new HashMap<>();
-        for (TradeConfig trade : trades.values()) {
-            slotMap.put(trade.getSlot(), trade);
-        }
-        return slotMap;
+        return tradesBySlot;
     }
 
     /**
