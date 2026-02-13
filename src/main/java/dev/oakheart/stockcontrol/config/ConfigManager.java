@@ -3,25 +3,40 @@ package dev.oakheart.stockcontrol.config;
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.data.CooldownMode;
 import dev.oakheart.stockcontrol.data.ShopConfig;
+import dev.oakheart.stockcontrol.data.StockMode;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
-import java.time.DayOfWeek;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.*;
+import java.util.logging.Level;
 
-import static dev.oakheart.stockcontrol.config.Messages.*;
+import static dev.oakheart.stockcontrol.message.MessageManager.*;
 
 /**
  * Manages plugin configuration including main config and trades config.
+ * Uses Bukkit's FileConfiguration (YamlConfiguration) for all YAML operations.
  */
 public class ConfigManager {
     private final ShopkeepersStockControl plugin;
+    private final File configFile;
+    private final File tradesFile;
     private FileConfiguration config;
     private FileConfiguration tradesConfig;
     private volatile Map<String, ShopConfig> shops;
+
+    // Cached values for hot-path access
+    private String storageType;
+    private int cooldownCheckInterval;
+    private int cacheTTL;
+    private int batchWriteInterval;
+    private boolean debugMode;
+    private int purgeInactiveDays;
 
     private static final Set<String> VALID_DAYS = Set.of(
             "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"
@@ -29,26 +44,78 @@ public class ConfigManager {
 
     public ConfigManager(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
-        this.shops = new HashMap<>();
+        this.configFile = new File(plugin.getDataFolder(), "config.yml");
+        this.tradesFile = new File(plugin.getDataFolder(), "trades.yml");
+        this.shops = Collections.emptyMap();
     }
 
     /**
-     * Loads all configuration files.
+     * Initial load of configuration. Called once during onEnable.
      */
-    public void loadConfig() {
+    public void load() {
         // Save default config files if they don't exist
-        plugin.saveDefaultConfig();
-        config = plugin.getConfig();
-
-        // Load trades.yml
-        File tradesFile = new File(plugin.getDataFolder(), "trades.yml");
+        if (!configFile.exists()) {
+            plugin.saveResource("config.yml", false);
+        }
         if (!tradesFile.exists()) {
             plugin.saveResource("trades.yml", false);
         }
+
+        // Load config.yml
+        config = YamlConfiguration.loadConfiguration(configFile);
+        mergeDefaults();
+        cacheValues();
+
+        // Load trades.yml
         tradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
 
         // Load shop configurations
         loadShops();
+    }
+
+    /**
+     * Merges default config values from the JAR resource into the user's config
+     * without overwriting existing values. Only saves when new keys are found.
+     */
+    private void mergeDefaults() {
+        try (InputStream defaultStream = plugin.getResource("config.yml")) {
+            if (defaultStream == null) return;
+
+            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
+                    new InputStreamReader(defaultStream));
+            config.setDefaults(defaults);
+
+            if (hasNewKeys(defaults)) {
+                config.options().copyDefaults(true);
+                config.save(configFile);
+                plugin.getLogger().info("Merged missing default config keys");
+            }
+        } catch (IOException e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to merge default config", e);
+        }
+    }
+
+    /**
+     * Checks if the defaults contain any keys not present in the user's config.
+     */
+    private boolean hasNewKeys(YamlConfiguration defaults) {
+        for (String key : defaults.getKeys(true)) {
+            if (defaults.isConfigurationSection(key)) continue;
+            if (!config.contains(key, true)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Caches frequently accessed configuration values.
+     */
+    private void cacheValues() {
+        storageType = config.getString("storage_type", "sqlite");
+        cooldownCheckInterval = config.getInt("cooldown_check_interval", 60);
+        cacheTTL = config.getInt("cache_ttl", 10);
+        batchWriteInterval = config.getInt("batch_write_interval", 30);
+        debugMode = config.getBoolean("debug", false);
+        purgeInactiveDays = config.getInt("purge_inactive_days", 0);
     }
 
     /**
@@ -58,14 +125,11 @@ public class ConfigManager {
      */
     public boolean reload() {
         try {
-            plugin.reloadConfig();
-            config = plugin.getConfig();
-
-            File tradesFile = new File(plugin.getDataFolder(), "trades.yml");
-            tradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
+            FileConfiguration newConfig = YamlConfiguration.loadConfiguration(configFile);
+            FileConfiguration newTradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
 
             // Load new shop configurations
-            Map<String, ShopConfig> newShops = loadShopsFromConfig();
+            Map<String, ShopConfig> newShops = loadShopsFromConfig(newTradesConfig);
 
             // Validate new configurations
             Set<String> errors = validateShops(newShops);
@@ -88,13 +152,16 @@ public class ConfigManager {
             }
 
             // Atomically swap configurations
-            this.shops = newShops;
+            this.config = newConfig;
+            this.tradesConfig = newTradesConfig;
+            this.shops = Collections.unmodifiableMap(newShops);
+            cacheValues();
+
             plugin.getLogger().info("Configuration reloaded successfully");
             return true;
 
         } catch (Exception e) {
-            plugin.getLogger().severe("Failed to reload config: " + e.getMessage());
-            e.printStackTrace();
+            plugin.getLogger().log(Level.SEVERE, "Failed to reload config", e);
             return false;
         }
     }
@@ -103,13 +170,13 @@ public class ConfigManager {
      * Loads shop configurations from trades.yml.
      */
     private void loadShops() {
-        shops = loadShopsFromConfig();
+        shops = Collections.unmodifiableMap(loadShopsFromConfig(tradesConfig));
 
         // Validate main config
-        Set<String> configErrors = validateMainConfig();
-        if (!configErrors.isEmpty()) {
+        Set<String> configWarnings = validateMainConfig();
+        if (!configWarnings.isEmpty()) {
             plugin.getLogger().warning("=== Configuration Warnings (config.yml) ===");
-            configErrors.forEach(error -> plugin.getLogger().warning("  - " + error));
+            configWarnings.forEach(warning -> plugin.getLogger().warning("  - " + warning));
         }
 
         // Validate shop configurations
@@ -124,12 +191,13 @@ public class ConfigManager {
     /**
      * Loads shop configurations from the trades config.
      *
+     * @param tradesNode The trades FileConfiguration
      * @return Map of shop ID to ShopConfig
      */
-    private Map<String, ShopConfig> loadShopsFromConfig() {
+    private Map<String, ShopConfig> loadShopsFromConfig(FileConfiguration tradesNode) {
         Map<String, ShopConfig> loadedShops = new HashMap<>();
 
-        ConfigurationSection shopsSection = tradesConfig.getConfigurationSection("shops");
+        ConfigurationSection shopsSection = tradesNode.getConfigurationSection("shops");
         if (shopsSection == null) {
             plugin.getLogger().warning("No shops configured in trades.yml");
             return loadedShops;
@@ -141,12 +209,15 @@ public class ConfigManager {
 
             String name = shopSection.getString("name", shopId);
             boolean enabled = shopSection.getBoolean("enabled", true);
-            boolean respectShopStock = shopSection.getBoolean("respect_shop_stock", false);
 
             // Per-shop cooldown settings
             CooldownMode cooldownMode = CooldownMode.fromString(shopSection.getString("cooldown_mode", "rolling"));
             String resetTime = shopSection.getString("reset_time", "00:00");
             String resetDay = shopSection.getString("reset_day", "monday").toUpperCase();
+
+            // Stock mode settings
+            StockMode stockMode = StockMode.fromString(shopSection.getString("stock_mode", "per_player"));
+            int shopMaxPerPlayer = shopSection.getInt("max_per_player", 0);
 
             Map<String, TradeConfig> trades = new HashMap<>();
             ConfigurationSection tradesSection = shopSection.getConfigurationSection("trades");
@@ -168,6 +239,10 @@ public class ConfigManager {
                             ? tradeSection.getString("reset_day").toUpperCase()
                             : resetDay;
 
+                    int tradeMaxPerPlayer = tradeSection.contains("max_per_player")
+                            ? tradeSection.getInt("max_per_player", 0)
+                            : shopMaxPerPlayer;
+
                     if (isDebugMode()) {
                         plugin.getLogger().info("Loading trade '" + tradeKey + "' for shop " + shopId +
                                 ": slot=" + slot + ", max_trades=" + maxTrades + ", cooldown=" + cooldown +
@@ -175,13 +250,13 @@ public class ConfigManager {
                     }
 
                     TradeConfig tradeConfig = new TradeConfig(tradeKey, slot, maxTrades, cooldown,
-                            tradeCooldownMode, tradeResetTime, tradeResetDay);
+                            tradeCooldownMode, tradeResetTime, tradeResetDay, tradeMaxPerPlayer);
                     trades.put(tradeKey, tradeConfig);
                 }
             }
 
-            ShopConfig shopConfig = new ShopConfig(shopId, name, enabled, respectShopStock,
-                    cooldownMode, resetTime, resetDay, trades);
+            ShopConfig shopConfig = new ShopConfig(shopId, name, enabled,
+                    cooldownMode, resetTime, resetDay, stockMode, shopMaxPerPlayer, trades);
             loadedShops.put(shopId, shopConfig);
         }
 
@@ -223,14 +298,24 @@ public class ConfigManager {
                 if (trade.getSlot() < 0) {
                     errors.add("Trade '" + trade.getTradeKey() + "': slot must be >= 0");
                 }
+                if (trade.getMaxPerPlayer() < 0) {
+                    errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
+                            + "': max_per_player must be >= 0");
+                }
+                if (trade.getMaxPerPlayer() > 0 && trade.getMaxPerPlayer() > trade.getMaxTrades()
+                        && shop.isShared()) {
+                    errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
+                            + "': max_per_player (" + trade.getMaxPerPlayer()
+                            + ") exceeds max_trades (" + trade.getMaxTrades() + ")");
+                }
 
                 // Validate per-trade cooldown settings
                 CooldownMode mode = trade.getCooldownMode();
                 if (mode == CooldownMode.DAILY || mode == CooldownMode.WEEKLY) {
-                    String resetTime = trade.getResetTime();
-                    if (!resetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
+                    String tradeResetTime = trade.getResetTime();
+                    if (!tradeResetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
                         errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                                + "': reset_time must be in HH:mm format (00:00 to 23:59). Current: '" + resetTime + "'");
+                                + "': reset_time must be in HH:mm format (00:00 to 23:59). Current: '" + tradeResetTime + "'");
                     }
                 }
                 if (mode == CooldownMode.WEEKLY) {
@@ -254,26 +339,21 @@ public class ConfigManager {
         Set<String> warnings = new HashSet<>();
 
         // Validate numeric ranges
-        int cooldownCheck = getCooldownCheckInterval();
-        if (cooldownCheck < 10 || cooldownCheck > 3600) {
-            warnings.add("cooldown_check_interval should be between 10-3600 seconds (currently: " + cooldownCheck + ")");
+        if (cooldownCheckInterval < 10 || cooldownCheckInterval > 3600) {
+            warnings.add("cooldown_check_interval should be between 10-3600 seconds (currently: " + cooldownCheckInterval + ")");
         }
 
-        int cacheTTL = getCacheTTL();
         if (cacheTTL < 5 || cacheTTL > 300) {
             warnings.add("cache_ttl should be between 5-300 seconds (currently: " + cacheTTL + ")");
         }
 
-        int batchWrite = getBatchWriteInterval();
-        if (batchWrite < 5 || batchWrite > 300) {
-            warnings.add("batch_write_interval should be between 5-300 seconds (currently: " + batchWrite + ")");
+        if (batchWriteInterval < 5 || batchWriteInterval > 300) {
+            warnings.add("batch_write_interval should be between 5-300 seconds (currently: " + batchWriteInterval + ")");
         }
 
         // Validate required message keys exist
         String[] requiredMessages = {
-            TRADE_LIMIT_REACHED, TRADES_REMAINING, COOLDOWN_ACTIVE,
-            TRADE_AVAILABLE, NO_PERMISSION, PLAYER_NOT_FOUND,
-            TRADES_RESET, ALL_TRADES_RESET, CONFIG_RELOADED, CONFIG_RELOAD_FAILED
+                TRADE_LIMIT_REACHED, TRADES_REMAINING, COOLDOWN_ACTIVE
         };
 
         for (String messageKey : requiredMessages) {
@@ -282,8 +362,11 @@ public class ConfigManager {
             }
         }
 
+        if (purgeInactiveDays < 0) {
+            warnings.add("purge_inactive_days must be >= 0 (0 to disable). Currently: " + purgeInactiveDays);
+        }
+
         // Validate storage type
-        String storageType = getStorageType();
         if (!storageType.equalsIgnoreCase("sqlite")) {
             warnings.add("storage_type '" + storageType + "' is not supported. Only 'sqlite' is currently supported.");
         }
@@ -291,34 +374,36 @@ public class ConfigManager {
         return warnings;
     }
 
-    // Getters for configuration values
+    // Getters for cached configuration values
     public String getStorageType() {
-        return config.getString("storage_type", "sqlite");
+        return storageType;
     }
 
     public int getCooldownCheckInterval() {
-        return config.getInt("cooldown_check_interval", 60);
+        return cooldownCheckInterval;
     }
 
     public int getCacheTTL() {
-        return config.getInt("cache_ttl", 10);
+        return cacheTTL;
     }
 
     public int getBatchWriteInterval() {
-        return config.getInt("batch_write_interval", 30);
+        return batchWriteInterval;
     }
 
     /**
-     * Refreshes only the main config.yml without reloading trades.yml
-     * or running orphan cleanup. Use this for lightweight changes like debug toggle.
+     * Toggles debug mode for the current session.
+     * Does not save to disk to avoid SnakeYAML reformatting the config file.
+     * The value resets to whatever is in config.yml on next server restart or reload.
+     *
+     * @param enabled Whether debug mode should be enabled
      */
-    public void refreshMainConfig() {
-        plugin.reloadConfig();
-        config = plugin.getConfig();
+    public void setDebugMode(boolean enabled) {
+        debugMode = enabled;
     }
 
     public boolean isDebugMode() {
-        return config.getBoolean("debug", false);
+        return debugMode;
     }
 
     public String getMessage(String key) {
@@ -330,7 +415,7 @@ public class ConfigManager {
     }
 
     public Map<String, ShopConfig> getShops() {
-        return new HashMap<>(shops);
+        return shops;
     }
 
     public ShopConfig getShop(String shopId) {
@@ -350,7 +435,20 @@ public class ConfigManager {
                 return shop;
             }
         }
+        // Fallback: try with underscores as spaces (for command tab-complete friendly names)
+        if (name.indexOf('_') >= 0) {
+            String spaced = name.replace('_', ' ');
+            for (ShopConfig shop : shops.values()) {
+                if (shop.getName().equalsIgnoreCase(spaced)) {
+                    return shop;
+                }
+            }
+        }
         return null;
+    }
+
+    public int getPurgeInactiveDays() {
+        return purgeInactiveDays;
     }
 
     public boolean hasShop(String shopId) {

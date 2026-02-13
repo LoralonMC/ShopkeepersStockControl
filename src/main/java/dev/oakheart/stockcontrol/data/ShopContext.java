@@ -16,14 +16,4 @@ public record ShopContext(
     public boolean isExpired() {
         return System.currentTimeMillis() > expiryTime;
     }
-
-    /**
-     * Gets remaining time until expiry in milliseconds.
-     *
-     * @return milliseconds remaining, or 0 if expired
-     */
-    public long getRemainingTime() {
-        long remaining = expiryTime - System.currentTimeMillis();
-        return Math.max(0, remaining);
-    }
 }

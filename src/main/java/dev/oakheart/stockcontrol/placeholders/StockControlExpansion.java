@@ -1,6 +1,7 @@
 package dev.oakheart.stockcontrol.placeholders;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
+import dev.oakheart.stockcontrol.data.CooldownMode;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
@@ -16,11 +17,13 @@ import org.jetbrains.annotations.Nullable;
  * The shop identifier can be either the shop ID (from trades.yml) or its display name.
  *
  * Supported placeholders:
- *   %ssc_remaining_<shop>:<trade>%  - Remaining trades (e.g., "3")
- *   %ssc_used_<shop>:<trade>%       - Used trades (e.g., "2")
- *   %ssc_max_<shop>:<trade>%        - Max trades from config (e.g., "5")
- *   %ssc_cooldown_<shop>:<trade>%   - Formatted cooldown or "Ready"
- *   %ssc_resettime_<shop>:<trade>%  - Reset time display (e.g., "00:00", "Monday 00:00", "")
+ *   %ssc_remaining_<shop>:<trade>%        - Remaining trades for the player (e.g., "3")
+ *   %ssc_used_<shop>:<trade>%             - Used trades by the player (e.g., "2")
+ *   %ssc_max_<shop>:<trade>%              - Effective max trades (per-player cap for shared, otherwise max_trades)
+ *   %ssc_cooldown_<shop>:<trade>%         - Formatted cooldown, "Ready", or "Sold out" (NONE mode)
+ *   %ssc_resettime_<shop>:<trade>%        - Reset time display (e.g., "00:00", "Monday 00:00", "Never")
+ *   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g., "100")
+ *   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g., "73")
  */
 public class StockControlExpansion extends PlaceholderExpansion {
 
@@ -37,12 +40,12 @@ public class StockControlExpansion extends PlaceholderExpansion {
 
     @Override
     public @NotNull String getAuthor() {
-        return String.join(", ", plugin.getDescription().getAuthors());
+        return String.join(", ", plugin.getPluginMeta().getAuthors());
     }
 
     @Override
     public @NotNull String getVersion() {
-        return plugin.getDescription().getVersion();
+        return plugin.getPluginMeta().getVersion();
     }
 
     @Override
@@ -82,19 +85,28 @@ public class StockControlExpansion extends PlaceholderExpansion {
 
         TradeDataManager tdm = plugin.getTradeDataManager();
 
+        // Determine effective max for the player (per-player cap for shared mode)
+        int effectiveMax = (shopConfig.isShared() && tradeConfig.getMaxPerPlayer() > 0)
+                ? tradeConfig.getMaxPerPlayer()
+                : tradeConfig.getMaxTrades();
+
         switch (action) {
             case "remaining":
                 return String.valueOf(tdm.getRemainingTrades(player.getUniqueId(), shopId, tradeKey));
 
             case "used": {
                 int remaining = tdm.getRemainingTrades(player.getUniqueId(), shopId, tradeKey);
-                return String.valueOf(tradeConfig.getMaxTrades() - remaining);
+                return String.valueOf(effectiveMax - remaining);
             }
 
             case "max":
-                return String.valueOf(tradeConfig.getMaxTrades());
+                return String.valueOf(effectiveMax);
 
             case "cooldown": {
+                if (tradeConfig.getCooldownMode() == CooldownMode.NONE) {
+                    int remaining = tdm.getRemainingTrades(player.getUniqueId(), shopId, tradeKey);
+                    return remaining > 0 ? "Available" : "Sold out";
+                }
                 if (tdm.hasCooldownExpired(player.getUniqueId(), shopId, tradeKey)) {
                     return "Ready";
                 }
@@ -104,6 +116,13 @@ public class StockControlExpansion extends PlaceholderExpansion {
 
             case "resettime":
                 return tdm.getResetTimeString(shopId, tradeKey);
+
+            case "globalmax":
+                return String.valueOf(tradeConfig.getMaxTrades());
+
+            case "globalremaining":
+                if (!shopConfig.isShared()) return String.valueOf(tradeConfig.getMaxTrades());
+                return String.valueOf(tdm.getGlobalRemainingTrades(shopId, tradeKey));
 
             default:
                 return null;

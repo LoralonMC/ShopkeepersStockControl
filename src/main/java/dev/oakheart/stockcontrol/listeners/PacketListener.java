@@ -7,8 +7,9 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMe
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.managers.PacketManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
-import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+
+import java.util.logging.Level;
 
 /**
  * Listens for merchant offer packets and modifies them to show per-player stock.
@@ -48,6 +49,11 @@ public class PacketListener extends PacketListenerAbstract {
             // Wrap the packet
             WrapperPlayServerMerchantOffers packet = new WrapperPlayServerMerchantOffers(event);
 
+            // Cache original offers before modification (only on first packet after shop open)
+            if (packetManager.shouldCachePacket(player.getUniqueId())) {
+                packetManager.cachePacketData(player.getUniqueId(), packet);
+            }
+
             // Let PacketManager modify the packet
             packetManager.modifyMerchantPacket(player, packet);
 
@@ -56,10 +62,7 @@ public class PacketListener extends PacketListenerAbstract {
             }
 
         } catch (Exception e) {
-            plugin.getLogger().severe("Error modifying merchant packet for " + player.getName() + ": " + e.getMessage());
-            if (plugin.getConfigManager().isDebugMode()) {
-                e.printStackTrace();
-            }
+            plugin.getLogger().log(Level.SEVERE, "Error modifying merchant packet for " + player.getName(), e);
         }
     }
 }

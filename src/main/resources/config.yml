@@ -15,27 +15,24 @@ cache_ttl: 10
 # How often to flush dirty data to database (reduces disk I/O)
 batch_write_interval: 30
 
+# Auto-purge trade data for inactive players (in days)
+# Removes data for players who haven't logged in for this many days.
+# Set to 0 to disable.
+purge_inactive_days: 0
+
 # Messages (using MiniMessage format)
 # Set any message to "" (empty string) to disable it
 #
-# Available message placeholders (used in chat messages only):
-#   {time_remaining} - Countdown until reset (e.g., "23h 45m", "6d 12h")
-#   {reset_time}     - Reset time display (e.g., "00:00" for daily, "Monday 00:00" for weekly, empty for rolling)
-#   {remaining}      - Number of trades remaining for the player
-#   {max}            - Maximum number of trades allowed
-#   {player}         - Player's name
+# Available placeholders:
+#   <time_remaining> - Countdown until reset (e.g., "23h 45m", "6d 12h")
+#   <reset_time>     - Reset time display (e.g., "00:00" for daily, "Monday 00:00" for weekly, empty for rolling)
+#   <remaining>      - Number of trades remaining for the player
+#   <max>            - Maximum number of trades allowed
 #
 messages:
-  trade_limit_reached: "<red>You've reached your limit! <gray>Cooldown: <yellow>{time_remaining}<gray> (Resets at {reset_time})"
-  trades_remaining: "<gray>Trades remaining: <green>{remaining}<gray>/<green>{max}"
-  cooldown_active: "<red>Cooldown active. <yellow>{time_remaining}<gray> (Resets at {reset_time})"
-  trade_available: "<green>This trade is available again!"
-  no_permission: "<red>You don't have permission to use this command."
-  player_not_found: "<red>Player not found or has never traded."
-  trades_reset: "<green>Reset trades for player: <yellow>{player}"
-  all_trades_reset: "<green>Reset all player trades."
-  config_reloaded: "<green>Configuration reloaded successfully."
-  config_reload_failed: "<red>Failed to reload configuration. Check console for errors."
+  trade_limit_reached: "<red>You've reached your limit! <gray>Cooldown: <yellow><time_remaining><gray> (Resets at <reset_time>)"
+  trades_remaining: "<gray>Trades remaining: <green><remaining><gray>/<green><max>"
+  cooldown_active: "<red>Cooldown active. <yellow><time_remaining><gray> (Resets at <reset_time>)"
 
 # === PlaceholderAPI Support ===
 # If PlaceholderAPI is installed, the following placeholders are available
@@ -44,11 +41,13 @@ messages:
 # Format: %ssc_<action>_<shop>:<trade>%
 # <shop> can be the shop ID (from trades.yml) or the display name (case-insensitive)
 #
-#   %ssc_remaining_<shop>:<trade>%  - Remaining trades (e.g., "3")
-#   %ssc_used_<shop>:<trade>%       - Used trades (e.g., "2")
-#   %ssc_max_<shop>:<trade>%        - Max trades from config (e.g., "5")
-#   %ssc_cooldown_<shop>:<trade>%   - Time until reset or "Ready"
-#   %ssc_resettime_<shop>:<trade>%  - Reset time (e.g., "00:00", "Monday 00:00")
+#   %ssc_remaining_<shop>:<trade>%        - Remaining trades (e.g., "3")
+#   %ssc_used_<shop>:<trade>%             - Used trades (e.g., "2")
+#   %ssc_max_<shop>:<trade>%              - Effective max (per-player cap for shared, otherwise max_trades)
+#   %ssc_cooldown_<shop>:<trade>%         - Time until reset, "Ready", or "Available"/"Sold out" (none mode)
+#   %ssc_resettime_<shop>:<trade>%        - Reset time (e.g., "00:00", "Monday 00:00", "Never")
+#   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g., "100")
+#   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g., "73")
 #
 # Examples:
 #   %ssc_remaining_miner:diamond%           - Using shop display name

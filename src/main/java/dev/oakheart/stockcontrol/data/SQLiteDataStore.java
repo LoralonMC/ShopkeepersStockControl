@@ -22,13 +22,22 @@ public class SQLiteDataStore implements DataStore {
     // Prepared statements for performance
     private PreparedStatement loadTradeStmt;
     private PreparedStatement loadPlayerStmt;
+    private PreparedStatement loadPlayerShopStmt;
     private PreparedStatement loadShopStmt;
     private PreparedStatement upsertTradeStmt;
     private PreparedStatement deleteTradeStmt;
     private PreparedStatement deletePlayerStmt;
     private PreparedStatement deletePlayerShopStmt;
+    private PreparedStatement deleteShopTradeStmt;
     private PreparedStatement deleteShopStmt;
     private PreparedStatement getAllPlayersStmt;
+
+    // Global trade prepared statements
+    private PreparedStatement loadGlobalTradeStmt;
+    private PreparedStatement loadGlobalShopStmt;
+    private PreparedStatement upsertGlobalTradeStmt;
+    private PreparedStatement deleteGlobalTradeStmt;
+    private PreparedStatement deleteGlobalShopStmt;
 
     public SQLiteDataStore(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
@@ -52,7 +61,6 @@ public class SQLiteDataStore implements DataStore {
             try (Statement stmt = connection.createStatement()) {
                 stmt.execute("PRAGMA journal_mode=WAL;");
                 stmt.execute("PRAGMA synchronous=NORMAL;");
-                stmt.execute("PRAGMA foreign_keys=ON;");
             }
 
             // Create tables
@@ -65,12 +73,10 @@ public class SQLiteDataStore implements DataStore {
             plugin.getLogger().info("SQLite database initialized successfully at: " + dbFile.getAbsolutePath());
 
         } catch (ClassNotFoundException e) {
-            plugin.getLogger().severe("SQLite JDBC driver not found!");
-            e.printStackTrace();
+            plugin.getLogger().log(Level.SEVERE, "SQLite JDBC driver not found", e);
             operational = false;
         } catch (SQLException e) {
-            plugin.getLogger().severe("Failed to initialize SQLite database: " + e.getMessage());
-            e.printStackTrace();
+            plugin.getLogger().log(Level.SEVERE, "Failed to initialize SQLite database", e);
             operational = false;
         }
     }
@@ -100,9 +106,22 @@ public class SQLiteDataStore implements DataStore {
         // Note: No separate (player_uuid, shop_id, trade_key) index needed —
         // the UNIQUE constraint already creates an equivalent index.
 
+        String createGlobalTableSQL = """
+                CREATE TABLE IF NOT EXISTS global_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    shop_id TEXT NOT NULL,
+                    trade_key TEXT NOT NULL,
+                    trades_used INTEGER DEFAULT 0,
+                    last_reset_epoch BIGINT,
+                    cooldown_seconds INTEGER NOT NULL,
+                    UNIQUE(shop_id, trade_key)
+                );
+                """;
+
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createTableSQL);
             stmt.execute(createPlayerShopIndexSQL);
+            stmt.execute(createGlobalTableSQL);
         }
 
         plugin.getLogger().info("Database tables created/verified successfully");
@@ -120,6 +139,11 @@ public class SQLiteDataStore implements DataStore {
         // Load all trades for a player
         loadPlayerStmt = connection.prepareStatement(
                 "SELECT * FROM player_trades WHERE player_uuid = ?"
+        );
+
+        // Load all trades for a player in a specific shop
+        loadPlayerShopStmt = connection.prepareStatement(
+                "SELECT * FROM player_trades WHERE player_uuid = ? AND shop_id = ?"
         );
 
         // Load all trades for a shop
@@ -153,6 +177,11 @@ public class SQLiteDataStore implements DataStore {
                 "DELETE FROM player_trades WHERE player_uuid = ? AND shop_id = ?"
         );
 
+        // Delete all trades for a specific shop and trade (all players)
+        deleteShopTradeStmt = connection.prepareStatement(
+                "DELETE FROM player_trades WHERE shop_id = ? AND trade_key = ?"
+        );
+
         // Delete all trades for a specific shop (all players)
         deleteShopStmt = connection.prepareStatement(
                 "DELETE FROM player_trades WHERE shop_id = ?"
@@ -161,6 +190,33 @@ public class SQLiteDataStore implements DataStore {
         // Get all unique player UUIDs
         getAllPlayersStmt = connection.prepareStatement(
                 "SELECT DISTINCT player_uuid FROM player_trades"
+        );
+
+        // Global trade statements
+        loadGlobalTradeStmt = connection.prepareStatement(
+                "SELECT * FROM global_trades WHERE shop_id = ? AND trade_key = ?"
+        );
+
+        loadGlobalShopStmt = connection.prepareStatement(
+                "SELECT * FROM global_trades WHERE shop_id = ?"
+        );
+
+        upsertGlobalTradeStmt = connection.prepareStatement("""
+                INSERT INTO global_trades (shop_id, trade_key, trades_used, last_reset_epoch, cooldown_seconds)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(shop_id, trade_key)
+                DO UPDATE SET
+                    trades_used = excluded.trades_used,
+                    last_reset_epoch = excluded.last_reset_epoch,
+                    cooldown_seconds = excluded.cooldown_seconds
+                """);
+
+        deleteGlobalTradeStmt = connection.prepareStatement(
+                "DELETE FROM global_trades WHERE shop_id = ? AND trade_key = ?"
+        );
+
+        deleteGlobalShopStmt = connection.prepareStatement(
+                "DELETE FROM global_trades WHERE shop_id = ?"
         );
     }
 
@@ -200,6 +256,27 @@ public class SQLiteDataStore implements DataStore {
             }
         } catch (SQLException e) {
             plugin.getLogger().log(Level.SEVERE, "Error loading player data", e);
+        }
+
+        return result;
+    }
+
+    @Override
+    public synchronized List<PlayerTradeData> loadPlayerShopData(UUID playerId, String shopId) {
+        List<PlayerTradeData> result = new ArrayList<>();
+        if (!operational) return result;
+
+        try {
+            loadPlayerShopStmt.setString(1, playerId.toString());
+            loadPlayerShopStmt.setString(2, shopId);
+
+            try (ResultSet rs = loadPlayerShopStmt.executeQuery()) {
+                while (rs.next()) {
+                    result.add(extractTradeData(rs));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error loading player shop data", e);
         }
 
         return result;
@@ -321,6 +398,22 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
+    public synchronized void deleteShopTradeData(String shopId, String tradeKey) {
+        if (!operational) return;
+
+        try {
+            deleteShopTradeStmt.setString(1, shopId);
+            deleteShopTradeStmt.setString(2, tradeKey);
+            int deleted = deleteShopTradeStmt.executeUpdate();
+            if (deleted > 0) {
+                plugin.getLogger().info("Deleted " + deleted + " player trade entries for " + shopId + ":" + tradeKey);
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error deleting shop trade data", e);
+        }
+    }
+
+    @Override
     public synchronized void deleteShopData(String shopId) {
         if (!operational) return;
 
@@ -356,6 +449,129 @@ public class SQLiteDataStore implements DataStore {
         return result;
     }
 
+    // === Global trade methods ===
+
+    @Override
+    public synchronized GlobalTradeData loadGlobalTradeData(String shopId, String tradeKey) {
+        if (!operational) return null;
+
+        try {
+            loadGlobalTradeStmt.setString(1, shopId);
+            loadGlobalTradeStmt.setString(2, tradeKey);
+
+            try (ResultSet rs = loadGlobalTradeStmt.executeQuery()) {
+                if (rs.next()) {
+                    return extractGlobalTradeData(rs);
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error loading global trade data", e);
+        }
+
+        return null;
+    }
+
+    @Override
+    public synchronized List<GlobalTradeData> loadGlobalShopData(String shopId) {
+        List<GlobalTradeData> result = new ArrayList<>();
+        if (!operational) return result;
+
+        try {
+            loadGlobalShopStmt.setString(1, shopId);
+
+            try (ResultSet rs = loadGlobalShopStmt.executeQuery()) {
+                while (rs.next()) {
+                    result.add(extractGlobalTradeData(rs));
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error loading global shop data", e);
+        }
+
+        return result;
+    }
+
+    @Override
+    public synchronized void saveGlobalTradeData(GlobalTradeData data) {
+        if (!operational) return;
+
+        try {
+            upsertGlobalTradeStmt.setString(1, data.getShopId());
+            upsertGlobalTradeStmt.setString(2, data.getTradeKey());
+            upsertGlobalTradeStmt.setInt(3, data.getTradesUsed());
+            upsertGlobalTradeStmt.setLong(4, data.getLastResetEpoch());
+            upsertGlobalTradeStmt.setInt(5, data.getCooldownSeconds());
+
+            upsertGlobalTradeStmt.executeUpdate();
+
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error saving global trade data", e);
+        }
+    }
+
+    @Override
+    public synchronized void batchSaveGlobalTradeData(List<GlobalTradeData> dataList) {
+        if (!operational || dataList.isEmpty()) return;
+
+        try {
+            connection.setAutoCommit(false);
+
+            for (GlobalTradeData data : dataList) {
+                upsertGlobalTradeStmt.setString(1, data.getShopId());
+                upsertGlobalTradeStmt.setString(2, data.getTradeKey());
+                upsertGlobalTradeStmt.setInt(3, data.getTradesUsed());
+                upsertGlobalTradeStmt.setLong(4, data.getLastResetEpoch());
+                upsertGlobalTradeStmt.setInt(5, data.getCooldownSeconds());
+                upsertGlobalTradeStmt.addBatch();
+            }
+
+            upsertGlobalTradeStmt.executeBatch();
+            connection.commit();
+            connection.setAutoCommit(true);
+
+            if (plugin.getConfigManager().isDebugMode()) {
+                plugin.getLogger().info("Batch saved " + dataList.size() + " global trade entries");
+            }
+
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error batch saving global trade data", e);
+            try {
+                connection.rollback();
+                connection.setAutoCommit(true);
+            } catch (SQLException ex) {
+                plugin.getLogger().log(Level.SEVERE, "Error rolling back transaction", ex);
+            }
+        }
+    }
+
+    @Override
+    public synchronized void deleteGlobalTradeData(String shopId, String tradeKey) {
+        if (!operational) return;
+
+        try {
+            deleteGlobalTradeStmt.setString(1, shopId);
+            deleteGlobalTradeStmt.setString(2, tradeKey);
+            deleteGlobalTradeStmt.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error deleting global trade data", e);
+        }
+    }
+
+    @Override
+    public synchronized void deleteGlobalShopData(String shopId) {
+        if (!operational) return;
+
+        try {
+            deleteGlobalShopStmt.setString(1, shopId);
+            int deleted = deleteGlobalShopStmt.executeUpdate();
+            if (deleted > 0) {
+                plugin.getLogger().info("Deleted " + deleted + " global trade entries for shop " + shopId);
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error deleting global shop data", e);
+        }
+    }
+
     @Override
     public boolean isOperational() {
         return operational && connection != null;
@@ -367,13 +583,20 @@ public class SQLiteDataStore implements DataStore {
             // Close prepared statements
             if (loadTradeStmt != null) loadTradeStmt.close();
             if (loadPlayerStmt != null) loadPlayerStmt.close();
+            if (loadPlayerShopStmt != null) loadPlayerShopStmt.close();
             if (loadShopStmt != null) loadShopStmt.close();
             if (upsertTradeStmt != null) upsertTradeStmt.close();
             if (deleteTradeStmt != null) deleteTradeStmt.close();
             if (deletePlayerStmt != null) deletePlayerStmt.close();
             if (deletePlayerShopStmt != null) deletePlayerShopStmt.close();
+            if (deleteShopTradeStmt != null) deleteShopTradeStmt.close();
             if (deleteShopStmt != null) deleteShopStmt.close();
             if (getAllPlayersStmt != null) getAllPlayersStmt.close();
+            if (loadGlobalTradeStmt != null) loadGlobalTradeStmt.close();
+            if (loadGlobalShopStmt != null) loadGlobalShopStmt.close();
+            if (upsertGlobalTradeStmt != null) upsertGlobalTradeStmt.close();
+            if (deleteGlobalTradeStmt != null) deleteGlobalTradeStmt.close();
+            if (deleteGlobalShopStmt != null) deleteGlobalShopStmt.close();
 
             // Close connection
             if (connection != null && !connection.isClosed()) {
@@ -400,5 +623,18 @@ public class SQLiteDataStore implements DataStore {
         int cooldownSeconds = rs.getInt("cooldown_seconds");
 
         return new PlayerTradeData(playerId, shopId, tradeKey, tradesUsed, lastResetEpoch, cooldownSeconds);
+    }
+
+    /**
+     * Extracts GlobalTradeData from a ResultSet.
+     */
+    private GlobalTradeData extractGlobalTradeData(ResultSet rs) throws SQLException {
+        String shopId = rs.getString("shop_id");
+        String tradeKey = rs.getString("trade_key");
+        int tradesUsed = rs.getInt("trades_used");
+        long lastResetEpoch = rs.getLong("last_reset_epoch");
+        int cooldownSeconds = rs.getInt("cooldown_seconds");
+
+        return new GlobalTradeData(shopId, tradeKey, tradesUsed, lastResetEpoch, cooldownSeconds);
     }
 }

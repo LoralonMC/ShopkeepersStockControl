@@ -1,5 +1,6 @@
 package dev.oakheart.stockcontrol.data;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -11,35 +12,39 @@ public class ShopConfig {
     private final String shopId;
     private final String name;  // Display name for the shop
     private final boolean enabled;
-    private final boolean respectShopStock;
     private final CooldownMode cooldownMode;
     private final String resetTime;   // HH:mm for daily/weekly modes
     private final String resetDay;    // Day of week for weekly mode (e.g., "MONDAY")
+    private final StockMode stockMode;       // per_player or shared
+    private final int maxPerPlayer;          // Default per-player cap for shared mode (0 = no cap)
     private final Map<String, TradeConfig> trades;  // Key: tradeKey, Value: TradeConfig
     private final Map<Integer, TradeConfig> tradesBySlot;  // Cached slot-to-trade mapping
 
     /**
      * Creates a new ShopConfig instance.
      *
-     * @param shopId            The shop's unique identifier
-     * @param name              Display name for the shop
-     * @param enabled           Whether this shop is enabled for tracking
-     * @param respectShopStock  Whether to respect Shopkeepers' finite stock
-     * @param cooldownMode      The cooldown reset mode (daily, weekly, or rolling)
-     * @param resetTime         Reset time in HH:mm format (for daily/weekly modes)
-     * @param resetDay          Day of week for weekly resets (e.g., "MONDAY")
-     * @param trades            Map of trade configurations
+     * @param shopId       The shop's unique identifier
+     * @param name         Display name for the shop
+     * @param enabled      Whether this shop is enabled for tracking
+     * @param cooldownMode The cooldown reset mode (daily, weekly, rolling, or none)
+     * @param resetTime    Reset time in HH:mm format (for daily/weekly modes)
+     * @param resetDay     Day of week for weekly resets (e.g., "MONDAY")
+     * @param stockMode    Stock tracking mode (per_player or shared)
+     * @param maxPerPlayer Default per-player purchase cap for shared mode (0 = no cap)
+     * @param trades       Map of trade configurations
      */
-    public ShopConfig(String shopId, String name, boolean enabled, boolean respectShopStock,
+    public ShopConfig(String shopId, String name, boolean enabled,
                       CooldownMode cooldownMode, String resetTime, String resetDay,
+                      StockMode stockMode, int maxPerPlayer,
                       Map<String, TradeConfig> trades) {
         this.shopId = shopId;
         this.name = name != null && !name.isEmpty() ? name : shopId;  // Fallback to shopId if no name
         this.enabled = enabled;
-        this.respectShopStock = respectShopStock;
         this.cooldownMode = cooldownMode;
         this.resetTime = resetTime;
         this.resetDay = resetDay;
+        this.stockMode = stockMode;
+        this.maxPerPlayer = maxPerPlayer;
         this.trades = new HashMap<>(trades);
 
         // Pre-compute slot map for fast lookups during packet modification
@@ -62,10 +67,6 @@ public class ShopConfig {
         return enabled;
     }
 
-    public boolean shouldRespectShopStock() {
-        return respectShopStock;
-    }
-
     public CooldownMode getCooldownMode() {
         return cooldownMode;
     }
@@ -78,8 +79,20 @@ public class ShopConfig {
         return resetDay;
     }
 
+    public StockMode getStockMode() {
+        return stockMode;
+    }
+
+    public int getMaxPerPlayer() {
+        return maxPerPlayer;
+    }
+
+    public boolean isShared() {
+        return stockMode == StockMode.SHARED;
+    }
+
     public Map<String, TradeConfig> getTrades() {
-        return new HashMap<>(trades);
+        return Collections.unmodifiableMap(trades);
     }
 
     /**
@@ -99,12 +112,7 @@ public class ShopConfig {
      * @return The TradeConfig, or null if not found
      */
     public TradeConfig getTradeBySlot(int slot) {
-        for (TradeConfig trade : trades.values()) {
-            if (trade.getSlot() == slot) {
-                return trade;
-            }
-        }
-        return null;
+        return tradesBySlot.get(slot);
     }
 
     /**
@@ -116,37 +124,11 @@ public class ShopConfig {
         return tradesBySlot;
     }
 
-    /**
-     * Validates this shop configuration.
-     *
-     * @return true if valid, false otherwise
-     */
-    public boolean isValid() {
-        if (shopId == null || shopId.isEmpty()) {
-            return false;
-        }
-
-        // Check for duplicate slots
-        Map<Integer, String> slotToKey = new HashMap<>();
-        for (TradeConfig trade : trades.values()) {
-            if (!trade.isValid()) {
-                return false;
-            }
-            String existing = slotToKey.put(trade.getSlot(), trade.getTradeKey());
-            if (existing != null) {
-                return false; // Duplicate slot
-            }
-        }
-
-        return true;
-    }
-
     @Override
     public String toString() {
         return "ShopConfig{" +
                 "shopId='" + shopId + '\'' +
                 ", enabled=" + enabled +
-                ", respectShopStock=" + respectShopStock +
                 ", trades=" + trades.size() +
                 '}';
     }

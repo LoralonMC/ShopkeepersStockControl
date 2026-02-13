@@ -6,19 +6,17 @@ import com.nisovin.shopkeepers.api.shopkeeper.Shopkeeper;
 import com.nisovin.shopkeepers.api.util.UnmodifiableItemStack;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
-import dev.oakheart.stockcontrol.config.Messages;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.managers.PacketManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
+import dev.oakheart.stockcontrol.message.MessageManager;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
+
+import java.util.logging.Level;
 
 /**
  * Listens for Shopkeepers events to track shop openings and validate trades.
@@ -29,7 +27,6 @@ public class ShopkeepersListener implements Listener {
     private final ShopkeepersStockControl plugin;
     private final PacketManager packetManager;
     private final TradeDataManager tradeDataManager;
-    private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
     public ShopkeepersListener(ShopkeepersStockControl plugin, PacketManager packetManager,
                                 TradeDataManager tradeDataManager) {
@@ -50,9 +47,7 @@ public class ShopkeepersListener implements Listener {
         // Get shop ID (use Shopkeeper's unique ID)
         String shopId = shopkeeper.getUniqueId().toString();
 
-        // Add to cache for packet modification
         packetManager.addShopMapping(player.getUniqueId(), shopId);
-
         // Pre-load trade data into cache so the packet thread never hits the database
         tradeDataManager.preloadShopData(player.getUniqueId(), shopId);
 
@@ -111,12 +106,10 @@ public class ShopkeepersListener implements Listener {
 
             // Send message to player (if configured)
             long timeRemaining = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
-            String message = plugin.getConfigManager().getMessage(Messages.TRADE_LIMIT_REACHED);
-            if (message != null && !message.isBlank()) {
-                message = message.replace("{time_remaining}", tradeDataManager.formatDuration(timeRemaining))
-                                 .replace("{reset_time}", tradeDataManager.getResetTimeString(shopId, matchedTradeKey));
-                sendFeedback(player, Messages.TRADE_LIMIT_REACHED, message);
-            }
+            plugin.getMessageManager().sendFeedback(player, MessageManager.TRADE_LIMIT_REACHED, java.util.Map.of(
+                    "time_remaining", tradeDataManager.formatDuration(timeRemaining),
+                    "reset_time", tradeDataManager.getResetTimeString(shopId, matchedTradeKey)
+            ));
 
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("Blocked trade for " + player.getName() +
@@ -128,32 +121,35 @@ public class ShopkeepersListener implements Listener {
         // Record the trade
         tradeDataManager.recordTrade(player.getUniqueId(), shopId, matchedTradeKey);
 
+        // Schedule debounced stock push for other viewers of shared shops
+        if (shopConfig.isShared()) {
+            packetManager.scheduleSharedStockPush(shopId);
+        }
+
         // Get remaining trades for feedback message
         int remaining = tradeDataManager.getRemainingTrades(player.getUniqueId(), shopId, matchedTradeKey);
 
-        // Note: No UI refresh needed! The client automatically updates stock visually
-        // when we send the initial packet with exact numbers (uses/maxUses)
-
         // Send feedback message
         if (remaining == 0) {
-            // Player just used their last trade
-            long timeUntilReset = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
-            String message = plugin.getConfigManager().getMessage(Messages.COOLDOWN_ACTIVE);
-            if (message != null && !message.isBlank()) {
-                message = message.replace("{time_remaining}", tradeDataManager.formatDuration(timeUntilReset))
-                                 .replace("{reset_time}", tradeDataManager.getResetTimeString(shopId, matchedTradeKey));
-                sendFeedback(player, Messages.COOLDOWN_ACTIVE, message);
-            }
+            // Player just used their last trade (or global stock depleted)
+            long timeUntilReset = shopConfig.isShared()
+                    ? tradeDataManager.getGlobalTimeUntilReset(shopId, matchedTradeKey)
+                    : tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
+            plugin.getMessageManager().sendFeedback(player, MessageManager.COOLDOWN_ACTIVE, java.util.Map.of(
+                    "time_remaining", tradeDataManager.formatDuration(timeUntilReset),
+                    "reset_time", tradeDataManager.getResetTimeString(shopId, matchedTradeKey)
+            ));
         } else {
             // Show remaining trades
             TradeConfig tradeConfig = shopConfig.getTrade(matchedTradeKey);
             if (tradeConfig != null) {
-                String message = plugin.getConfigManager().getMessage(Messages.TRADES_REMAINING);
-                if (message != null && !message.isBlank()) {
-                    message = message.replace("{remaining}", String.valueOf(remaining))
-                                     .replace("{max}", String.valueOf(tradeConfig.getMaxTrades()));
-                    sendFeedback(player, Messages.TRADES_REMAINING, message);
-                }
+                int displayMax = (shopConfig.isShared() && tradeConfig.getMaxPerPlayer() > 0)
+                        ? tradeConfig.getMaxPerPlayer()
+                        : tradeConfig.getMaxTrades();
+                plugin.getMessageManager().sendFeedback(player, MessageManager.TRADES_REMAINING, java.util.Map.of(
+                        "remaining", String.valueOf(remaining),
+                        "max", String.valueOf(displayMax)
+                ));
             }
         }
 
@@ -161,16 +157,6 @@ public class ShopkeepersListener implements Listener {
             plugin.getLogger().info("Recorded trade for " + player.getName() +
                     " at " + shopId + ":" + matchedTradeKey +
                     " (remaining: " + remaining + ")");
-        }
-    }
-
-    private void sendFeedback(Player player, String messageKey, String message) {
-        if (message == null || message.isBlank()) return;
-        Component component = miniMessage.deserialize(message);
-        if ("action_bar".equalsIgnoreCase(plugin.getConfigManager().getMessageDisplay(messageKey))) {
-            player.sendActionBar(component);
-        } else {
-            player.sendMessage(component);
         }
     }
 
@@ -201,9 +187,6 @@ public class ShopkeepersListener implements Listener {
             }
 
             // Find the index of the clicked recipe by comparing items
-            // Note: event.getTradingRecipe() returns SKTradingRecipe
-            // but shopkeeper.getTradingRecipes() returns SKTradeOffer
-            // They're different classes, so we compare items instead
             int clickedIndex = -1;
             for (int i = 0; i < allRecipes.size(); i++) {
                 var recipe = allRecipes.get(i);
@@ -249,36 +232,11 @@ public class ShopkeepersListener implements Listener {
 
         } catch (Exception e) {
             if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().warning("Error matching trade: " + e.getMessage());
-                e.printStackTrace();
+                plugin.getLogger().log(Level.WARNING, "Error matching trade", e);
             }
         }
 
         return null;
-    }
-
-    /**
-     * Called when a player closes any inventory.
-     * We remove the shop mapping to clean up the cache.
-     */
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onInventoryClose(InventoryCloseEvent event) {
-        if (event.getPlayer() instanceof Player player) {
-            // Don't remove mapping immediately - let it expire via TTL
-            // This prevents issues where inventory close events fire before packets are sent
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("Inventory closed for " + player.getName() + " - mapping will expire via TTL");
-            }
-        }
-    }
-
-    /**
-     * Called when a player quits.
-     * Clean up any cached mappings.
-     */
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onPlayerQuit(PlayerQuitEvent event) {
-        packetManager.removeShopMapping(event.getPlayer().getUniqueId());
     }
 
     /**
@@ -309,7 +267,7 @@ public class ShopkeepersListener implements Listener {
             return false;
         }
 
-        // Use isSimilar for full comparison (type, amount, and meta/NBT)
+        // Use isSimilar for full comparison (type and meta/NBT) + explicit amount check
         boolean match = stack1.isSimilar(stack2) && stack1.getAmount() == stack2.getAmount();
 
         if (plugin.getConfigManager().isDebugMode()) {

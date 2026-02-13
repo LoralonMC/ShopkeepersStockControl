@@ -9,7 +9,9 @@ public enum CooldownMode {
     /** Resets at a fixed time on a specific day each week (e.g., Monday midnight). */
     WEEKLY,
     /** Resets a configured number of seconds after the player's first trade. */
-    ROLLING;
+    ROLLING,
+    /** Never restocks automatically. Stock remains depleted until an admin manually restocks. */
+    NONE;
 
     /**
      * Parses a cooldown mode from a config string.

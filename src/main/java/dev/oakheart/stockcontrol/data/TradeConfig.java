@@ -13,6 +13,7 @@ public class TradeConfig {
     private final CooldownMode cooldownMode; // Resolved cooldown mode (trade-level or inherited from shop)
     private final String resetTime;         // HH:mm for daily/weekly modes
     private final String resetDay;          // Day of week for weekly mode (e.g., "MONDAY")
+    private final int maxPerPlayer;         // Per-player cap in shared mode (0 = no cap)
 
     /**
      * Creates a new TradeConfig instance.
@@ -24,9 +25,11 @@ public class TradeConfig {
      * @param cooldownMode     Resolved cooldown mode
      * @param resetTime        Reset time in HH:mm format
      * @param resetDay         Day of week for weekly resets (e.g., "MONDAY")
+     * @param maxPerPlayer     Per-player purchase cap in shared mode (0 = no cap)
      */
     public TradeConfig(String tradeKey, int slot, int maxTrades, int cooldownSeconds,
-                       CooldownMode cooldownMode, String resetTime, String resetDay) {
+                       CooldownMode cooldownMode, String resetTime, String resetDay,
+                       int maxPerPlayer) {
         this.tradeKey = tradeKey;
         this.slot = slot;
         this.maxTrades = maxTrades;
@@ -34,6 +37,7 @@ public class TradeConfig {
         this.cooldownMode = cooldownMode;
         this.resetTime = resetTime;
         this.resetDay = resetDay;
+        this.maxPerPlayer = maxPerPlayer;
     }
 
     public String getTradeKey() {
@@ -62,6 +66,10 @@ public class TradeConfig {
 
     public String getResetDay() {
         return resetDay;
+    }
+
+    public int getMaxPerPlayer() {
+        return maxPerPlayer;
     }
 
     /**

@@ -1,0 +1,19 @@
+name: ShopkeepersStockControl
+version: '${version}'
+main: dev.oakheart.stockcontrol.ShopkeepersStockControl
+description: 'A Shopkeepers addon that enables per-player trade limits with accurate stock display.'
+api-version: '1.21.10'
+authors:
+  - Loralon
+website: https://github.com/LoralonMC/ShopkeepersStockControl
+dependencies:
+  server:
+    Shopkeepers:
+      load: BEFORE
+      required: true
+    packetevents:
+      load: BEFORE
+      required: true
+    PlaceholderAPI:
+      load: BEFORE
+      required: false
