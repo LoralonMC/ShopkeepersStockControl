@@ -1,4 +1,6 @@
-# Trade limits per Shopkeepers shop
+# ============================================================
+# TRADE LIMITS PER SHOPKEEPERS SHOP
+# ============================================================
 # IMPORTANT: Use stable trade keys (not numeric indices)
 # This allows you to reorder trades without breaking player data
 #
@@ -9,24 +11,24 @@
 #
 # Format:
 # shops:
-#   <shopkeeper_uuid>:  # Use the actual Shopkeeper UUID here
-#     name: "Display Name"  # Optional: Friendly name shown in /ssc check (defaults to shopkeeper_id)
+#   <shopkeeper_uuid>:
+#     name: "Display Name"
 #     enabled: true
-#     cooldown_mode: daily       # Shop-level default: daily, weekly, or rolling (default: rolling)
-#     reset_time: "00:00"        # Shop-level default for daily/weekly: HH:mm (default: "00:00")
-#     reset_day: "monday"        # Shop-level default for weekly: day of week (default: "monday")
+#     cooldown-mode: daily
+#     reset-time: "00:00"
+#     reset-day: "monday"
 #     trades:
 #       <stable_trade_key>:
-#         slot: <number>           # REQUIRED: Position in villager UI (0 = first trade, 1 = second, etc.)
-#         max_trades: <number>     # REQUIRED: How many times a player can do this trade
-#         cooldown: <seconds>      # Cooldown duration in seconds (required for rolling mode, ignored for daily/weekly/none)
-#         cooldown_mode: rolling   # Optional: Override shop-level default for this trade
-#         reset_time: "00:00"      # Optional: Override shop-level reset time
-#         reset_day: "monday"      # Optional: Override shop-level reset day (weekly only)
+#         slot: <number>
+#         max-trades: <number>
+#         cooldown: <seconds>
+#         cooldown-mode: rolling
+#         reset-time: "00:00"
+#         reset-day: "monday"
 #
 # COOLDOWN MODES:
-#   daily   - Trade resets at reset_time every day (e.g., midnight)
-#   weekly  - Trade resets at reset_time on reset_day each week (e.g., Monday midnight)
+#   daily   - Trade resets at reset-time every day (e.g. midnight)
+#   weekly  - Trade resets at reset-time on reset-day each week (e.g. Monday midnight)
 #   rolling - Trade resets individually X seconds after the player's first trade
 #   none    - Never restocks automatically (admin must use /ssc restock)
 #
@@ -35,12 +37,12 @@
 #   shared               - All players share a single stock pool
 #
 # SHARED MODE OPTIONS:
-#   stock_mode: shared       - Enables shared stock for the shop
-#   max_per_player: <number> - Optional per-player purchase cap (0 = no cap)
-#                              Can be set at shop level (inherited) or per-trade (override)
+#   stock-mode: shared
+#   max-per-player: <number>   - Optional per-player purchase cap (0 = no cap)
+#                                Can be set at shop level (inherited) or per-trade (override)
 #
 # HIERARCHY: Per-trade settings override per-shop settings.
-# If a trade doesn't specify cooldown_mode/reset_time/reset_day, it inherits from the shop.
+# If a trade doesn't specify cooldown-mode/reset-time/reset-day, it inherits from the shop.
 # If the shop doesn't specify them either, defaults are: rolling / 00:00 / monday.
 
 # EXAMPLE configurations (replace these with your actual Shopkeeper UUIDs!)
@@ -51,122 +53,122 @@ shops:
   miner:
     name: "Miner"
     enabled: true
-    cooldown_mode: daily
-    reset_time: "00:00"
+    cooldown-mode: daily
+    reset-time: "00:00"
     trades:
       diamond_trade:
         slot: 0
-        max_trades: 4
+        max-trades: 4
       netherite_scrap_trade:
         slot: 1
-        max_trades: 1
+        max-trades: 1
       gold_ingot_trade:
         slot: 2
-        max_trades: 4
+        max-trades: 4
 
   # Daily reset at 6 AM (shop-level default)
   lumberjack:
     name: "Lumberjack"
     enabled: true
-    cooldown_mode: daily
-    reset_time: "06:00"
+    cooldown-mode: daily
+    reset-time: "06:00"
     trades:
       oak_log_trade:
         slot: 0
-        max_trades: 2
+        max-trades: 2
       spruce_log_trade:
         slot: 1
-        max_trades: 2
+        max-trades: 2
       birch_log_trade:
         slot: 2
-        max_trades: 2
+        max-trades: 2
 
   # Rolling cooldown example - each trade resets 24h after first use
   farmer:
     name: "Farmer"
     enabled: true
-    cooldown_mode: rolling
+    cooldown-mode: rolling
     trades:
       honey_bottle_trade:
         slot: 0
-        max_trades: 2
+        max-trades: 2
         cooldown: 86400  # 24 hours
       wheat_trade:
         slot: 1
-        max_trades: 5
+        max-trades: 5
         cooldown: 86400  # 24 hours
       carrot_trade:
         slot: 2
-        max_trades: 5
+        max-trades: 5
         cooldown: 86400  # 24 hours
 
   # Rolling cooldown with varied durations
   alchemist:
     name: "Alchemist"
     enabled: true
-    cooldown_mode: rolling
+    cooldown-mode: rolling
     trades:
       wither_skull_trade:
         slot: 0
-        max_trades: 3
+        max-trades: 3
         cooldown: 86400  # 24 hours
       dragon_breath_trade:
         slot: 1
-        max_trades: 2
+        max-trades: 2
         cooldown: 86400  # 24 hours
       phantom_membrane_trade:
         slot: 2
-        max_trades: 4
+        max-trades: 4
         cooldown: 86400  # 24 hours
 
   # Mixed cooldown example - shop defaults to daily, but rare trade overrides to weekly
   fisherman:
     name: "Fisherman"
     enabled: true
-    cooldown_mode: daily
-    reset_time: "00:00"
+    cooldown-mode: daily
+    reset-time: "00:00"
     trades:
       heart_of_sea_trade:
         slot: 0
-        max_trades: 1
-        cooldown_mode: weekly    # Override: this rare trade resets weekly instead of daily
-        reset_day: "monday"
+        max-trades: 1
+        cooldown-mode: weekly    # Override: this rare trade resets weekly instead of daily
+        reset-day: "monday"
       nautilus_shell_trade:        # Inherits daily mode from shop
         slot: 1
-        max_trades: 2
+        max-trades: 2
       cod_trade:                   # Inherits daily mode from shop
         slot: 2
-        max_trades: 10
+        max-trades: 10
 
   # Shared stock example - ALL players draw from the same pool
-  # Perfect for limited event items (e.g., 100 santa hats for Christmas)
+  # Perfect for limited event items (e.g. 100 santa hats for Christmas)
   # christmas_shop:
   #   name: "Christmas Shop"
   #   enabled: true
-  #   stock_mode: shared           # All players share one stock pool
-  #   cooldown_mode: none          # Never restocks (admin manual restock with /ssc restock)
-  #   max_per_player: 5            # Per-player purchase cap (inherited by all trades)
+  #   stock-mode: shared
+  #   cooldown-mode: none
+  #   max-per-player: 5
   #   trades:
   #     santa_hat:
   #       slot: 0
-  #       max_trades: 100          # 100 total for ALL players combined
+  #       max-trades: 100
   #       cooldown: 0
   #     candy_cane:
   #       slot: 1
-  #       max_trades: 200
+  #       max-trades: 200
   #       cooldown: 0
-  #       max_per_player: 10       # Override: allow 10 per player for this trade
+  #       max-per-player: 10
 
   # Shared stock with daily restock - shared pool refills every day
   # market_stall:
   #   name: "Market Stall"
   #   enabled: true
-  #   stock_mode: shared
-  #   cooldown_mode: daily
-  #   reset_time: "00:00"
+  #   stock-mode: shared
+  #   cooldown-mode: daily
+  #   reset-time: "00:00"
   #   trades:
   #     rare_gem:
   #       slot: 0
-  #       max_trades: 50           # 50 gems restocked daily, shared among all players
+  #       max-trades: 50
   #       cooldown: 86400
-  #       max_per_player: 3        # Max 3 per player per day
+  #       max-per-player: 3

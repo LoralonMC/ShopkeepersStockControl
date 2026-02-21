@@ -1,10 +1,37 @@
 permissions:
   shopkeepersstock.*:
-    description: 'Grants all ShopkeepersStockControl permissions'
+    description: 'All ShopkeepersStockControl permissions'
     default: op
     children:
-      shopkeepersstock.admin: true
-
-  shopkeepersstock.admin:
-    description: 'Admin access to all SSC commands'
+      shopkeepersstock.reload: true
+      shopkeepersstock.reset: true
+      shopkeepersstock.check: true
+      shopkeepersstock.restock: true
+      shopkeepersstock.info: true
+      shopkeepersstock.debug: true
+      shopkeepersstock.cleanup: true
+      shopkeepersstock.help: true
+  shopkeepersstock.reload:
+    description: 'Reload configuration'
+    default: op
+  shopkeepersstock.reset:
+    description: 'Reset player trade data'
+    default: op
+  shopkeepersstock.check:
+    description: 'Check player trade data'
+    default: op
+  shopkeepersstock.restock:
+    description: 'Restock shared-mode shops'
+    default: op
+  shopkeepersstock.info:
+    description: 'View shop configuration'
+    default: op
+  shopkeepersstock.debug:
+    description: 'Toggle debug mode'
+    default: op
+  shopkeepersstock.cleanup:
+    description: 'Trigger expired data cleanup'
+    default: op
+  shopkeepersstock.help:
+    description: 'View command help'
     default: op

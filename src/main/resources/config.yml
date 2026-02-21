@@ -1,65 +1,189 @@
-# ShopkeepersStockControl Configuration
+# ============================================================
+# SHOPKEEPERS STOCK CONTROL
+# Per-player trade limits with accurate stock display
+# ============================================================
+
+# ============================================================
+# GENERAL SETTINGS
+# ============================================================
 
 # Data storage type (only 'sqlite' is currently supported)
-storage_type: sqlite
+storage-type: sqlite
 
-# Cooldown check frequency (in seconds)
-# How often to check for expired cooldowns and clean up data
-cooldown_check_interval: 60
+# How often to check for expired cooldowns and clean up data (seconds)
+cooldown-check-interval: 60
 
-# Cache time-to-live (seconds)
-# Auto-expire shop mappings after this duration (prevents memory leaks from missed events)
-cache_ttl: 10
+# Auto-expire shop mappings after this duration (seconds)
+# Prevents memory leaks from missed events
+cache-ttl: 10
 
-# Batch write interval (seconds)
-# How often to flush dirty data to database (reduces disk I/O)
-batch_write_interval: 30
+# How often to flush dirty data to database (seconds)
+# Reduces disk I/O by batching writes
+batch-write-interval: 30
 
-# Auto-purge trade data for inactive players (in days)
+# Auto-purge trade data for inactive players (days)
 # Removes data for players who haven't logged in for this many days.
 # Set to 0 to disable.
-purge_inactive_days: 0
+purge-inactive-days: 0
 
-# Messages (using MiniMessage format)
-# Set any message to "" (empty string) to disable it
+# ============================================================
+# MESSAGES
+# ============================================================
+# https://docs.advntr.dev/minimessage/format.html
 #
-# Available placeholders:
-#   <time_remaining> - Countdown until reset (e.g., "23h 45m", "6d 12h")
-#   <reset_time>     - Reset time display (e.g., "00:00" for daily, "Monday 00:00" for weekly, empty for rolling)
+# Player trade messages have text: and display: (chat or action_bar).
+# Admin/command messages have text: only (always sent via chat).
+# Set text to "" to disable individual messages.
+#
+# Player trade placeholders:
+#   <time_remaining> - Countdown until reset (e.g. "23h 45m", "6d 12h")
+#   <reset_time>     - Reset time display (e.g. "00:00", "Monday 00:00")
 #   <remaining>      - Number of trades remaining for the player
 #   <max>            - Maximum number of trades allowed
-#
 messages:
-  trade_limit_reached: "<red>You've reached your limit! <gray>Cooldown: <yellow><time_remaining><gray> (Resets at <reset_time>)"
-  trades_remaining: "<gray>Trades remaining: <green><remaining><gray>/<green><max>"
-  cooldown_active: "<red>Cooldown active. <yellow><time_remaining><gray> (Resets at <reset_time>)"
+  # --- Player trade feedback ---
+  trade-limit-reached:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#C27B6B>You've reached your limit! <#f2ebd7>Cooldown: <#FCD472><time_remaining> <#f2ebd7>(Resets at <#FCD472><reset_time><#f2ebd7>)"
+    display: chat
+  trades-remaining:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#f2ebd7>Trades remaining: <#FCD472><remaining><#f2ebd7>/<#FCD472><max>"
+    display: action_bar
+  cooldown-active:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#D89B6A>Cooldown active. <#FCD472><time_remaining> <#f2ebd7>(Resets at <#FCD472><reset_time><#f2ebd7>)"
+    display: action_bar
+  # --- Shared errors ---
+  # Placeholders: <player>, <shop>, <trade>
+  error-player-not-found:
+    text: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Player not found: <#FCD472><player>"
+  error-shop-not-found:
+    text: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Shop not found: <#FCD472><shop>"
+  error-trade-not-found:
+    text: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Trade not found: <#FCD472><trade> <#C27B6B>in shop <#FCD472><shop>"
+  error-not-shared:
+    text: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Shop <#FCD472><shop> <#C27B6B>is not in shared stock mode. Use <#FCD472>/ssc reset <#C27B6B>for per-player shops."
+  # --- Help ---
+  help:
+    text:
+      - "<#6B7A5E>=== ShopkeepersStockControl Commands ==="
+      - "<#FCD472>/ssc reload <#f2ebd7>- Reload configuration"
+      - "<#FCD472>/ssc reset <player> [shop] [trade] <#f2ebd7>- Reset trade data"
+      - "<#FCD472>/ssc check <player> [shop] [trade] <#f2ebd7>- Check remaining trades"
+      - "<#FCD472>/ssc restock <shop> [trade] <#f2ebd7>- Restock a shared shop"
+      - "<#FCD472>/ssc info <shop> <#f2ebd7>- Show shop configuration details"
+      - "<#FCD472>/ssc debug <#f2ebd7>- Toggle debug mode"
+      - "<#FCD472>/ssc cleanup <#f2ebd7>- Manually trigger cleanup"
+      - "<#FCD472>/ssc help <#f2ebd7>- Show this help message"
+  # --- Reload ---
+  reload-start:
+    text: "<#D89B6A>Reloading configuration..."
+  reload-success:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Configuration reloaded successfully!"
+  reload-failed:
+    text: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Failed to reload configuration. Check console for errors."
+  # --- Debug ---
+  debug-enabled:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#f2ebd7>Debug mode <#8FAA87>enabled"
+  debug-disabled:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#f2ebd7>Debug mode <#D89B6A>disabled"
+  # --- Cleanup ---
+  # Placeholders: <count>
+  cleanup-start:
+    text: "<#D89B6A>Running manual cleanup..."
+  cleanup-complete:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Cleanup complete! Removed <#FCD472><count> <#8FAA87>expired entries."
+  # --- Reset ---
+  # Placeholders: <player>, <shop>, <trade>
+  reset-player:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Reset all trades for player <#FCD472><player>"
+  reset-player-shop:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Reset trades for player <#FCD472><player> <#8FAA87>in shop <#FCD472><shop>"
+  reset-player-shop-trade:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Reset trade <#FCD472><trade> <#8FAA87>for player <#FCD472><player> <#8FAA87>in shop <#FCD472><shop>"
+  # --- Restock ---
+  # Placeholders: <shop>, <trade>
+  restock-shop:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Restocked all trades in shop <#FCD472><shop>"
+  restock-trade:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Restocked trade <#FCD472><trade> <#8FAA87>in shop <#FCD472><shop>"
+  # --- Check (no-data warnings) ---
+  # Placeholders: <player>, <shop>, <trade>
+  check-no-data:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#D89B6A>Player <#FCD472><player> <#D89B6A>has no trade data."
+  check-no-data-shop:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#D89B6A>Player <#FCD472><player> <#D89B6A>has no trades in shop <#FCD472><shop><#D89B6A>."
+  check-no-data-trade:
+    text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#D89B6A>Player <#FCD472><player> <#D89B6A>has no data for trade <#FCD472><trade><#D89B6A>."
+  # --- Check (display output) ---
+  # Placeholders: <player>, <shop>, <trade>, <used>, <max>, <remaining>, <cooldown>
+  check-header:
+    text: "<#6B7A5E>=== Trade data for <#FCD472><player> <#6B7A5E>==="
+  check-shop:
+    text: "<#f2ebd7>Shop: <#FCD472><shop>"
+  check-trade:
+    text: "<#f2ebd7>  Trade: <#FCD472><trade>"
+  check-used:
+    text: "<#f2ebd7>  Used: <#FCD472><used><#6C757D>/<#FCD472><max>"
+  check-remaining:
+    text: "<#f2ebd7>  Remaining: <#FCD472><remaining>"
+  check-cooldown-never:
+    text: "<#f2ebd7>  Cooldown: <#D89B6A>Never (manual restock)"
+  check-cooldown-active:
+    text: "<#f2ebd7>  Cooldown: <#FCD472><cooldown>"
+  check-cooldown-ready:
+    text: "<#f2ebd7>  Cooldown: <#8FAA87>Ready"
+  # --- Info (display output) ---
+  # Placeholders: <name>, <id>, <enabled>, <mode>, <time>, <day>, <cap>, <count>, <key>, <details>
+  info-header:
+    text: "<#6B7A5E>=== Shop Info: <#FCD472><name> <#6B7A5E>==="
+  info-id:
+    text: "<#f2ebd7>ID: <#FCD472><id>"
+  info-enabled:
+    text: "<#f2ebd7>Enabled: <#FCD472><enabled>"
+  info-stock-mode:
+    text: "<#f2ebd7>Stock Mode: <#FCD472><mode>"
+  info-cooldown-mode:
+    text: "<#f2ebd7>Cooldown Mode: <#FCD472><mode>"
+  info-reset-time:
+    text: "<#f2ebd7>Reset Time: <#FCD472><time>"
+  info-reset-day:
+    text: "<#f2ebd7>Reset Day: <#FCD472><day>"
+  info-per-player-cap:
+    text: "<#f2ebd7>Default Per-Player Cap: <#FCD472><cap>"
+  info-trades-count:
+    text: "<#f2ebd7>Trades: <#FCD472><count>"
+  info-trade-entry:
+    text: "<#6C757D>  - <#FCD472><key> <#6C757D>(<details>)"
 
-# === PlaceholderAPI Support ===
+# ============================================================
+# PLACEHOLDERAPI SUPPORT
+# ============================================================
 # If PlaceholderAPI is installed, the following placeholders are available
 # for use in scoreboards, holograms, tab lists, etc.
 #
 # Format: %ssc_<action>_<shop>:<trade>%
 # <shop> can be the shop ID (from trades.yml) or the display name (case-insensitive)
 #
-#   %ssc_remaining_<shop>:<trade>%        - Remaining trades (e.g., "3")
-#   %ssc_used_<shop>:<trade>%             - Used trades (e.g., "2")
-#   %ssc_max_<shop>:<trade>%              - Effective max (per-player cap for shared, otherwise max_trades)
+#   %ssc_remaining_<shop>:<trade>%        - Remaining trades (e.g. "3")
+#   %ssc_used_<shop>:<trade>%             - Used trades (e.g. "2")
+#   %ssc_max_<shop>:<trade>%              - Effective max (per-player cap for shared, otherwise max-trades)
 #   %ssc_cooldown_<shop>:<trade>%         - Time until reset, "Ready", or "Available"/"Sold out" (none mode)
-#   %ssc_resettime_<shop>:<trade>%        - Reset time (e.g., "00:00", "Monday 00:00", "Never")
-#   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g., "100")
-#   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g., "73")
+#   %ssc_resettime_<shop>:<trade>%        - Reset time (e.g. "00:00", "Monday 00:00", "Never")
+#   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g. "100")
+#   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g. "73")
 #
 # Examples:
-#   %ssc_remaining_miner:diamond%           - Using shop display name
-#   %ssc_cooldown_f65776c2-...-bdf4d:diamond%  - Using shop ID
+#   %ssc_remaining_miner:diamond%             - Using shop display name
+#   %ssc_cooldown_f65776c2-...-bdf4d:diamond% - Using shop ID
 
-# Message display mode: "chat" or "action_bar"
-# Controls where each message type appears
-message_display:
-  trade_limit_reached: chat
-  trades_remaining: action_bar
-  cooldown_active: action_bar
+# ============================================================
+# ADVANCED
+# ============================================================
 
-# Debug mode (logs detailed information to console - useful for troubleshooting)
+# Debug mode (logs detailed information to console)
 # Set to true to see packet modifications, trade events, and cache operations
 debug: false
+
+# ========================================
+#          DO NOT EDIT BELOW
+# ========================================
+config-version: 2

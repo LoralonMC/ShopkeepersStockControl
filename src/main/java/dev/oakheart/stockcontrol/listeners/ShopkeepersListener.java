@@ -100,6 +100,9 @@ public class ShopkeepersListener implements Listener {
             return;
         }
 
+        // Reset expired cooldowns before checking
+        tradeDataManager.resetIfExpired(player.getUniqueId(), shopId, matchedTradeKey);
+
         // Check if player can trade
         if (!tradeDataManager.canTrade(player.getUniqueId(), shopId, matchedTradeKey)) {
             event.setCancelled(true);

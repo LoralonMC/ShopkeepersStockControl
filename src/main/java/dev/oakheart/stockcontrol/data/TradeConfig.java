@@ -72,18 +72,6 @@ public class TradeConfig {
         return maxPerPlayer;
     }
 
-    /**
-     * Validates this trade configuration.
-     *
-     * @return true if valid, false otherwise
-     */
-    public boolean isValid() {
-        return tradeKey != null && !tradeKey.isEmpty()
-                && slot >= 0
-                && maxTrades > 0
-                && (cooldownMode != CooldownMode.ROLLING || cooldownSeconds > 0);
-    }
-
     @Override
     public String toString() {
         return "TradeConfig{" +

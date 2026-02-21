@@ -1,13 +1,13 @@
 package dev.oakheart.stockcontrol.message;
 
 import dev.oakheart.stockcontrol.config.ConfigManager;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -17,10 +17,68 @@ import java.util.Map;
  */
 public class MessageManager {
 
-    // Message key constants (player-facing trade feedback only)
-    public static final String TRADE_LIMIT_REACHED = "trade_limit_reached";
-    public static final String TRADES_REMAINING = "trades_remaining";
-    public static final String COOLDOWN_ACTIVE = "cooldown_active";
+    // Player trade feedback
+    public static final String TRADE_LIMIT_REACHED = "trade-limit-reached";
+    public static final String TRADES_REMAINING = "trades-remaining";
+    public static final String COOLDOWN_ACTIVE = "cooldown-active";
+
+    // Shared errors
+    public static final String ERROR_PLAYER_NOT_FOUND = "error-player-not-found";
+    public static final String ERROR_SHOP_NOT_FOUND = "error-shop-not-found";
+    public static final String ERROR_TRADE_NOT_FOUND = "error-trade-not-found";
+    public static final String ERROR_NOT_SHARED = "error-not-shared";
+
+    // Help
+    public static final String HELP = "help";
+
+    // Reload
+    public static final String RELOAD_START = "reload-start";
+    public static final String RELOAD_SUCCESS = "reload-success";
+    public static final String RELOAD_FAILED = "reload-failed";
+
+    // Debug
+    public static final String DEBUG_ENABLED = "debug-enabled";
+    public static final String DEBUG_DISABLED = "debug-disabled";
+
+    // Cleanup
+    public static final String CLEANUP_START = "cleanup-start";
+    public static final String CLEANUP_COMPLETE = "cleanup-complete";
+
+    // Reset
+    public static final String RESET_PLAYER = "reset-player";
+    public static final String RESET_PLAYER_SHOP = "reset-player-shop";
+    public static final String RESET_PLAYER_SHOP_TRADE = "reset-player-shop-trade";
+
+    // Restock
+    public static final String RESTOCK_SHOP = "restock-shop";
+    public static final String RESTOCK_TRADE = "restock-trade";
+
+    // Check (no-data warnings)
+    public static final String CHECK_NO_DATA = "check-no-data";
+    public static final String CHECK_NO_DATA_SHOP = "check-no-data-shop";
+    public static final String CHECK_NO_DATA_TRADE = "check-no-data-trade";
+
+    // Check (display output)
+    public static final String CHECK_HEADER = "check-header";
+    public static final String CHECK_SHOP = "check-shop";
+    public static final String CHECK_TRADE = "check-trade";
+    public static final String CHECK_USED = "check-used";
+    public static final String CHECK_REMAINING = "check-remaining";
+    public static final String CHECK_COOLDOWN_NEVER = "check-cooldown-never";
+    public static final String CHECK_COOLDOWN_ACTIVE = "check-cooldown-active";
+    public static final String CHECK_COOLDOWN_READY = "check-cooldown-ready";
+
+    // Info (display output)
+    public static final String INFO_HEADER = "info-header";
+    public static final String INFO_ID = "info-id";
+    public static final String INFO_ENABLED = "info-enabled";
+    public static final String INFO_STOCK_MODE = "info-stock-mode";
+    public static final String INFO_COOLDOWN_MODE = "info-cooldown-mode";
+    public static final String INFO_RESET_TIME = "info-reset-time";
+    public static final String INFO_RESET_DAY = "info-reset-day";
+    public static final String INFO_PER_PLAYER_CAP = "info-per-player-cap";
+    public static final String INFO_TRADES_COUNT = "info-trades-count";
+    public static final String INFO_TRADE_ENTRY = "info-trade-entry";
 
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final ConfigManager configManager;
@@ -52,12 +110,11 @@ public class MessageManager {
         if (message == null || message.isBlank()) return;
 
         TagResolver resolver = buildResolver(placeholders);
-        Component component = miniMessage.deserialize(message, resolver);
 
         if ("action_bar".equalsIgnoreCase(configManager.getMessageDisplay(messageKey))) {
-            player.sendActionBar(component);
+            player.sendActionBar(miniMessage.deserialize(message, resolver));
         } else {
-            player.sendMessage(component);
+            player.sendMessage(miniMessage.deserialize(message, resolver));
         }
     }
 
@@ -87,10 +144,30 @@ public class MessageManager {
     }
 
     /**
-     * Gets the MiniMessage instance for inline message formatting.
+     * Sends a multiline message (YAML list) to a command sender.
+     * Each list item is deserialized and sent as a separate chat message.
+     *
+     * @param sender The command sender
+     * @param messageKey The message key in config (text: is a YAML list)
+     * @param placeholders Map of placeholder names to values
      */
-    public MiniMessage getMiniMessage() {
-        return miniMessage;
+    public void sendMultiline(CommandSender sender, String messageKey, Map<String, String> placeholders) {
+        List<String> lines = configManager.getMessageList(messageKey);
+        if (lines == null || lines.isEmpty()) return;
+
+        TagResolver resolver = buildResolver(placeholders);
+        for (String line : lines) {
+            if (line != null && !line.isBlank()) {
+                sender.sendMessage(miniMessage.deserialize(line, resolver));
+            }
+        }
+    }
+
+    /**
+     * Sends a multiline message (YAML list) to a command sender without placeholders.
+     */
+    public void sendMultiline(CommandSender sender, String messageKey) {
+        sendMultiline(sender, messageKey, Map.of());
     }
 
     /**

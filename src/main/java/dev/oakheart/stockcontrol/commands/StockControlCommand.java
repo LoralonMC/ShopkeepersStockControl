@@ -2,16 +2,14 @@ package dev.oakheart.stockcontrol.commands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
-import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.data.*;
+import dev.oakheart.stockcontrol.message.MessageManager;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
-import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
@@ -19,17 +17,18 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @SuppressWarnings("UnstableApiUsage")
 public class StockControlCommand {
 
     private final ShopkeepersStockControl plugin;
-    private final MiniMessage miniMessage = MiniMessage.miniMessage();
+    private final MessageManager messageManager;
 
     public StockControlCommand(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
+        this.messageManager = plugin.getMessageManager();
     }
 
     public void register() {
@@ -43,37 +42,42 @@ public class StockControlCommand {
 
     private LiteralCommandNode<CommandSourceStack> buildCommand() {
         return Commands.literal("ssc")
-                .requires(src -> src.getSender().hasPermission("shopkeepersstock.admin"))
+                .requires(src -> src.getSender().hasPermission("shopkeepersstock.help"))
                 .executes(ctx -> {
                     sendHelp(ctx.getSource().getSender());
                     return Command.SINGLE_SUCCESS;
                 })
                 // help
                 .then(Commands.literal("help")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.help"))
                         .executes(ctx -> {
                             sendHelp(ctx.getSource().getSender());
                             return Command.SINGLE_SUCCESS;
                         }))
                 // reload
                 .then(Commands.literal("reload")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.reload"))
                         .executes(ctx -> {
                             handleReload(ctx.getSource().getSender());
                             return Command.SINGLE_SUCCESS;
                         }))
                 // debug
                 .then(Commands.literal("debug")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.debug"))
                         .executes(ctx -> {
                             handleDebug(ctx.getSource().getSender());
                             return Command.SINGLE_SUCCESS;
                         }))
                 // cleanup
                 .then(Commands.literal("cleanup")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.cleanup"))
                         .executes(ctx -> {
                             handleCleanup(ctx.getSource().getSender());
                             return Command.SINGLE_SUCCESS;
                         }))
                 // info <shop>
                 .then(Commands.literal("info")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.info"))
                         .then(Commands.argument("shop", StringArgumentType.word())
                                 .suggests((ctx, builder) -> {
                                     String input = builder.getRemainingLowerCase();
@@ -92,6 +96,7 @@ public class StockControlCommand {
                                 })))
                 // restock <shop> [trade]
                 .then(Commands.literal("restock")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.restock"))
                         .then(Commands.argument("shop", StringArgumentType.word())
                                 .suggests((ctx, builder) -> {
                                     String input = builder.getRemainingLowerCase();
@@ -132,9 +137,11 @@ public class StockControlCommand {
                                         }))))
                 // reset <player> [shop] [trade]
                 .then(Commands.literal("reset")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.reset"))
                         .then(buildPlayerShopTradeArgs(true)))
                 // check <player> [shop] [trade]
                 .then(Commands.literal("check")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.check"))
                         .then(buildPlayerShopTradeArgs(false)))
                 .build();
     }
@@ -245,28 +252,20 @@ public class StockControlCommand {
     // ===== Help =====
 
     private void sendHelp(CommandSender sender) {
-        sender.sendMessage(miniMessage.deserialize("<green>=== ShopkeepersStockControl Commands ==="));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc reload<white> - Reload configuration"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc reset <player> [shop] [trade]<white> - Reset trade data"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc check <player> [shop] [trade]<white> - Check remaining trades"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc restock <shop> [trade]<white> - Restock a shared shop"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc info <shop><white> - Show shop configuration details"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc debug<white> - Toggle debug mode"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc cleanup<white> - Manually trigger cleanup"));
-        sender.sendMessage(miniMessage.deserialize("<aqua>/ssc help<white> - Show this help message"));
+        messageManager.sendMultiline(sender, MessageManager.HELP);
     }
 
     // ===== Reload =====
 
     private void handleReload(CommandSender sender) {
-        sender.sendMessage(miniMessage.deserialize("<yellow>Reloading configuration..."));
+        messageManager.send(sender, MessageManager.RELOAD_START);
 
         boolean success = plugin.reloadPluginConfig();
 
         if (success) {
-            sender.sendMessage(miniMessage.deserialize("<green>Configuration reloaded successfully!"));
+            messageManager.send(sender, MessageManager.RELOAD_SUCCESS);
         } else {
-            sender.sendMessage(miniMessage.deserialize("<red>Failed to reload configuration. Check console for errors."));
+            messageManager.send(sender, MessageManager.RELOAD_FAILED);
         }
     }
 
@@ -279,22 +278,21 @@ public class StockControlCommand {
         plugin.getConfigManager().setDebugMode(newDebug);
 
         if (newDebug) {
-            sender.sendMessage(miniMessage.deserialize("<green>Debug mode enabled"));
+            messageManager.send(sender, MessageManager.DEBUG_ENABLED);
         } else {
-            sender.sendMessage(miniMessage.deserialize("<yellow>Debug mode disabled"));
+            messageManager.send(sender, MessageManager.DEBUG_DISABLED);
         }
     }
 
     // ===== Cleanup =====
 
     private void handleCleanup(CommandSender sender) {
-        sender.sendMessage(miniMessage.deserialize("<yellow>Running manual cleanup..."));
+        messageManager.send(sender, MessageManager.CLEANUP_START);
 
         int cleaned = plugin.getCooldownManager().triggerManualCleanup();
 
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>Cleanup complete! Removed <white><count></white> expired entries",
-                Placeholder.unparsed("count", String.valueOf(cleaned))));
+        messageManager.send(sender, MessageManager.CLEANUP_COMPLETE,
+                Map.of("count", String.valueOf(cleaned)));
     }
 
     // ===== Info =====
@@ -302,56 +300,39 @@ public class StockControlCommand {
     private void handleInfo(CommandSender sender, String shopArg) {
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
         String shortId = shop.getShopId().length() > 8
                 ? shop.getShopId().substring(0, 8) + "..."
                 : shop.getShopId();
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>=== Shop Info: <white><name></white> ===",
-                Placeholder.unparsed("name", shop.getName())));
-        sender.sendMessage(miniMessage.deserialize(
-                "<aqua>ID: <white><id>",
-                Placeholder.unparsed("id", shortId)));
-        sender.sendMessage(miniMessage.deserialize(
-                "<aqua>Enabled: <white><enabled>",
-                Placeholder.unparsed("enabled", String.valueOf(shop.isEnabled()))));
-        sender.sendMessage(miniMessage.deserialize(
-                "<aqua>Stock Mode: <white><mode>",
-                Placeholder.unparsed("mode", shop.getStockMode().name().toLowerCase())));
+
+        messageManager.send(sender, MessageManager.INFO_HEADER, Map.of("name", shop.getName()));
+        messageManager.send(sender, MessageManager.INFO_ID, Map.of("id", shortId));
+        messageManager.send(sender, MessageManager.INFO_ENABLED, Map.of("enabled", String.valueOf(shop.isEnabled())));
+        messageManager.send(sender, MessageManager.INFO_STOCK_MODE, Map.of("mode", shop.getStockMode().name().toLowerCase()));
 
         String cooldownDisplay = shop.getCooldownMode() == CooldownMode.NONE
                 ? "none (manual restock)"
                 : shop.getCooldownMode().name().toLowerCase();
-        sender.sendMessage(miniMessage.deserialize(
-                "<aqua>Cooldown Mode: <white><mode>",
-                Placeholder.unparsed("mode", cooldownDisplay)));
+        messageManager.send(sender, MessageManager.INFO_COOLDOWN_MODE, Map.of("mode", cooldownDisplay));
 
         if (shop.getCooldownMode() == CooldownMode.DAILY || shop.getCooldownMode() == CooldownMode.WEEKLY) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>Reset Time: <white><time>",
-                    Placeholder.unparsed("time", shop.getResetTime())));
+            messageManager.send(sender, MessageManager.INFO_RESET_TIME, Map.of("time", shop.getResetTime()));
         }
         if (shop.getCooldownMode() == CooldownMode.WEEKLY) {
             String day = shop.getResetDay().charAt(0) + shop.getResetDay().substring(1).toLowerCase();
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>Reset Day: <white><day>",
-                    Placeholder.unparsed("day", day)));
+            messageManager.send(sender, MessageManager.INFO_RESET_DAY, Map.of("day", day));
         }
 
         if (shop.isShared() && shop.getMaxPerPlayer() > 0) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>Default Per-Player Cap: <white><cap>",
-                    Placeholder.unparsed("cap", String.valueOf(shop.getMaxPerPlayer()))));
+            messageManager.send(sender, MessageManager.INFO_PER_PLAYER_CAP,
+                    Map.of("cap", String.valueOf(shop.getMaxPerPlayer())));
         }
 
-        sender.sendMessage(miniMessage.deserialize(
-                "<aqua>Trades: <white><count>",
-                Placeholder.unparsed("count", String.valueOf(shop.getTrades().size()))));
+        messageManager.send(sender, MessageManager.INFO_TRADES_COUNT,
+                Map.of("count", String.valueOf(shop.getTrades().size())));
 
         for (TradeConfig trade : shop.getTrades().values()) {
             StringBuilder details = new StringBuilder();
@@ -368,10 +349,8 @@ public class StockControlCommand {
                 details.append(", per-player ").append(trade.getMaxPerPlayer());
             }
 
-            sender.sendMessage(miniMessage.deserialize(
-                    "<gray>  - <white><key><gray> (<details>)",
-                    Placeholder.unparsed("key", trade.getTradeKey()),
-                    Placeholder.unparsed("details", details.toString())));
+            messageManager.send(sender, MessageManager.INFO_TRADE_ENTRY,
+                    Map.of("key", trade.getTradeKey(), "details", details.toString()));
         }
     }
 
@@ -380,67 +359,48 @@ public class StockControlCommand {
     private void handleResetPlayer(CommandSender sender, String playerName) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Player not found: <white><player>",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
             return;
         }
 
         plugin.getTradeDataManager().resetPlayerTrades(playerId);
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>Reset all trades for player <white><player>",
-                Placeholder.unparsed("player", playerName)));
+        messageManager.send(sender, MessageManager.RESET_PLAYER, Map.of("player", playerName));
     }
 
     private void handleResetPlayerShop(CommandSender sender, String playerName, String shopArg) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Player not found: <white><player>",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
             return;
         }
 
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
-        String shopId = shop.getShopId();
-        plugin.getTradeDataManager().resetPlayerShopTrades(playerId, shopId);
-
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>Reset trades for player <white><player></white> in shop <white><shop>",
-                Placeholder.unparsed("player", playerName),
-                Placeholder.unparsed("shop", shop.getName())));
+        plugin.getTradeDataManager().resetPlayerShopTrades(playerId, shop.getShopId());
+        messageManager.send(sender, MessageManager.RESET_PLAYER_SHOP,
+                Map.of("player", playerName, "shop", shop.getName()));
     }
 
     private void handleResetPlayerShopTrade(CommandSender sender, String playerName, String shopArg, String tradeKey) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Player not found: <white><player>",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
             return;
         }
 
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
         plugin.getTradeDataManager().resetPlayerTrade(playerId, shop.getShopId(), tradeKey);
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>Reset trade <white><trade></white> for player <white><player></white> in shop <white><shop>",
-                Placeholder.unparsed("trade", tradeKey),
-                Placeholder.unparsed("player", playerName),
-                Placeholder.unparsed("shop", shop.getName())));
+        messageManager.send(sender, MessageManager.RESET_PLAYER_SHOP_TRADE,
+                Map.of("trade", tradeKey, "player", playerName, "shop", shop.getName()));
     }
 
     // ===== Restock handlers =====
@@ -448,55 +408,41 @@ public class StockControlCommand {
     private void handleRestockShop(CommandSender sender, String shopArg) {
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
         if (!shop.isShared()) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop <white><shop></white> is not in shared stock mode. Use <aqua>/ssc reset</aqua> for per-player shops.",
-                    Placeholder.unparsed("shop", shop.getName())));
+            messageManager.send(sender, MessageManager.ERROR_NOT_SHARED, Map.of("shop", shop.getName()));
             return;
         }
 
         plugin.getTradeDataManager().resetGlobalShop(shop.getShopId());
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>Restocked all trades in shop <white><shop>",
-                Placeholder.unparsed("shop", shop.getName())));
+        messageManager.send(sender, MessageManager.RESTOCK_SHOP, Map.of("shop", shop.getName()));
     }
 
     private void handleRestockTrade(CommandSender sender, String shopArg, String tradeKey) {
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
         if (!shop.isShared()) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop <white><shop></white> is not in shared stock mode. Use <aqua>/ssc reset</aqua> for per-player shops.",
-                    Placeholder.unparsed("shop", shop.getName())));
+            messageManager.send(sender, MessageManager.ERROR_NOT_SHARED, Map.of("shop", shop.getName()));
             return;
         }
 
         TradeConfig trade = shop.getTrade(tradeKey);
         if (trade == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Trade not found: <white><trade></white> in shop <white><shop>",
-                    Placeholder.unparsed("trade", tradeKey),
-                    Placeholder.unparsed("shop", shop.getName())));
+            messageManager.send(sender, MessageManager.ERROR_TRADE_NOT_FOUND,
+                    Map.of("trade", tradeKey, "shop", shop.getName()));
             return;
         }
 
         plugin.getTradeDataManager().resetGlobalTrade(shop.getShopId(), tradeKey);
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>Restocked trade <white><trade></white> in shop <white><shop>",
-                Placeholder.unparsed("trade", tradeKey),
-                Placeholder.unparsed("shop", shop.getName())));
+        messageManager.send(sender, MessageManager.RESTOCK_TRADE,
+                Map.of("trade", tradeKey, "shop", shop.getName()));
     }
 
     // ===== Check handlers =====
@@ -504,9 +450,7 @@ public class StockControlCommand {
     private void handleCheckPlayer(CommandSender sender, String playerName) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Player not found: <white><player>",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
             return;
         }
 
@@ -514,9 +458,7 @@ public class StockControlCommand {
         List<PlayerTradeData> playerTrades = plugin.getTradeDataManager().getPlayerTrades(playerId);
 
         if (playerTrades.isEmpty()) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<yellow>Player <white><player></white> has no trade data",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.CHECK_NO_DATA, Map.of("player", playerName));
             return;
         }
 
@@ -526,17 +468,13 @@ public class StockControlCommand {
     private void handleCheckPlayerShop(CommandSender sender, String playerName, String shopArg) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Player not found: <white><player>",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
             return;
         }
 
         ShopConfig filterShop = resolveShop(shopArg);
         if (filterShop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
@@ -544,13 +482,11 @@ public class StockControlCommand {
         String shopId = filterShop.getShopId();
         List<PlayerTradeData> playerTrades = plugin.getTradeDataManager().getPlayerTrades(playerId).stream()
                 .filter(data -> data.getShopId().equals(shopId))
-                .collect(Collectors.toList());
+                .toList();
 
         if (playerTrades.isEmpty()) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<yellow>Player <white><player></white> has no trades in shop <white><shop>",
-                    Placeholder.unparsed("player", playerName),
-                    Placeholder.unparsed("shop", filterShop.getName())));
+            messageManager.send(sender, MessageManager.CHECK_NO_DATA_SHOP,
+                    Map.of("player", playerName, "shop", filterShop.getName()));
             return;
         }
 
@@ -560,17 +496,13 @@ public class StockControlCommand {
     private void handleCheckPlayerShopTrade(CommandSender sender, String playerName, String shopArg, String tradeKey) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Player not found: <white><player>",
-                    Placeholder.unparsed("player", playerName)));
+            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
             return;
         }
 
         ShopConfig filterShop = resolveShop(shopArg);
         if (filterShop == null) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<red>Shop not found: <white><shop>",
-                    Placeholder.unparsed("shop", shopArg)));
+            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
             return;
         }
 
@@ -578,13 +510,11 @@ public class StockControlCommand {
         String shopId = filterShop.getShopId();
         List<PlayerTradeData> playerTrades = plugin.getTradeDataManager().getPlayerTrades(playerId).stream()
                 .filter(data -> data.getShopId().equals(shopId) && data.getTradeKey().equals(tradeKey))
-                .collect(Collectors.toList());
+                .toList();
 
         if (playerTrades.isEmpty()) {
-            sender.sendMessage(miniMessage.deserialize(
-                    "<yellow>Player <white><player></white> has no data for trade <white><trade>",
-                    Placeholder.unparsed("player", playerName),
-                    Placeholder.unparsed("trade", tradeKey)));
+            messageManager.send(sender, MessageManager.CHECK_NO_DATA_TRADE,
+                    Map.of("player", playerName, "trade", tradeKey));
             return;
         }
 
@@ -592,9 +522,7 @@ public class StockControlCommand {
     }
 
     private void displayTradeData(CommandSender sender, String playerName, UUID playerId, List<PlayerTradeData> playerTrades) {
-        sender.sendMessage(miniMessage.deserialize(
-                "<green>=== Trade data for <white><player></white> ===",
-                Placeholder.unparsed("player", playerName)));
+        messageManager.send(sender, MessageManager.CHECK_HEADER, Map.of("player", playerName));
 
         for (PlayerTradeData data : playerTrades) {
             int remaining = plugin.getTradeDataManager().getRemainingTrades(playerId, data.getShopId(), data.getTradeKey());
@@ -609,34 +537,25 @@ public class StockControlCommand {
             String shopName = shop != null ? shop.getName() : data.getShopId();
             int usedCount = cooldownExpired ? 0 : data.getTradesUsed();
 
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>Shop: <white><shop>",
-                    Placeholder.unparsed("shop", shopName)));
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>  Trade: <white><trade>",
-                    Placeholder.unparsed("trade", data.getTradeKey())));
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>  Used: <white><used>/<max>",
-                    Placeholder.unparsed("used", String.valueOf(usedCount)),
-                    Placeholder.unparsed("max", String.valueOf(maxTrades))));
-            sender.sendMessage(miniMessage.deserialize(
-                    "<aqua>  Remaining: <white><remaining>",
-                    Placeholder.unparsed("remaining", String.valueOf(remaining))));
+            messageManager.send(sender, MessageManager.CHECK_SHOP, Map.of("shop", shopName));
+            messageManager.send(sender, MessageManager.CHECK_TRADE, Map.of("trade", data.getTradeKey()));
+            messageManager.send(sender, MessageManager.CHECK_USED,
+                    Map.of("used", String.valueOf(usedCount), "max", String.valueOf(maxTrades)));
+            messageManager.send(sender, MessageManager.CHECK_REMAINING,
+                    Map.of("remaining", String.valueOf(remaining)));
 
             if (timeRemaining < 0) {
-                // NONE mode — never resets
-                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <yellow>Never (manual restock)"));
+                messageManager.send(sender, MessageManager.CHECK_COOLDOWN_NEVER);
             } else if (timeRemaining > 0) {
                 String resetInfo = plugin.getTradeDataManager().formatDuration(timeRemaining);
                 String resetTime = plugin.getTradeDataManager().getResetTimeString(data.getShopId(), data.getTradeKey());
                 if (!resetTime.isEmpty() && !resetTime.equals("Never")) {
                     resetInfo += " (Resets at " + resetTime + ")";
                 }
-                sender.sendMessage(miniMessage.deserialize(
-                        "<aqua>  Cooldown: <white><cooldown>",
-                        Placeholder.unparsed("cooldown", resetInfo)));
+                messageManager.send(sender, MessageManager.CHECK_COOLDOWN_ACTIVE,
+                        Map.of("cooldown", resetInfo));
             } else {
-                sender.sendMessage(miniMessage.deserialize("<aqua>  Cooldown: <green>Ready"));
+                messageManager.send(sender, MessageManager.CHECK_COOLDOWN_READY);
             }
         }
     }

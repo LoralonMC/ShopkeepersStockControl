@@ -61,6 +61,8 @@ public final class ShopkeepersStockControl extends JavaPlugin {
         if (dataStore != null) {
             dataStore.close();
         }
+
+        getLogger().info("ShopkeepersStockControl disabled.");
     }
 
     private void checkDependencies() {
@@ -139,6 +141,8 @@ public final class ShopkeepersStockControl extends JavaPlugin {
         if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
             new StockControlExpansion(this).register();
             getLogger().info("PlaceholderAPI expansion registered.");
+        } else {
+            getLogger().info("PlaceholderAPI not found — placeholders disabled.");
         }
     }
 

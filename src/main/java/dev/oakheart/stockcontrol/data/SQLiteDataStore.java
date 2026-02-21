@@ -23,7 +23,6 @@ public class SQLiteDataStore implements DataStore {
     private PreparedStatement loadTradeStmt;
     private PreparedStatement loadPlayerStmt;
     private PreparedStatement loadPlayerShopStmt;
-    private PreparedStatement loadShopStmt;
     private PreparedStatement upsertTradeStmt;
     private PreparedStatement deleteTradeStmt;
     private PreparedStatement deletePlayerStmt;
@@ -144,11 +143,6 @@ public class SQLiteDataStore implements DataStore {
         // Load all trades for a player in a specific shop
         loadPlayerShopStmt = connection.prepareStatement(
                 "SELECT * FROM player_trades WHERE player_uuid = ? AND shop_id = ?"
-        );
-
-        // Load all trades for a shop
-        loadShopStmt = connection.prepareStatement(
-                "SELECT * FROM player_trades WHERE shop_id = ?"
         );
 
         // Upsert trade data
@@ -277,26 +271,6 @@ public class SQLiteDataStore implements DataStore {
             }
         } catch (SQLException e) {
             plugin.getLogger().log(Level.SEVERE, "Error loading player shop data", e);
-        }
-
-        return result;
-    }
-
-    @Override
-    public synchronized List<PlayerTradeData> loadShopData(String shopId) {
-        List<PlayerTradeData> result = new ArrayList<>();
-        if (!operational) return result;
-
-        try {
-            loadShopStmt.setString(1, shopId);
-
-            try (ResultSet rs = loadShopStmt.executeQuery()) {
-                while (rs.next()) {
-                    result.add(extractTradeData(rs));
-                }
-            }
-        } catch (SQLException e) {
-            plugin.getLogger().log(Level.SEVERE, "Error loading shop data", e);
         }
 
         return result;
@@ -584,7 +558,6 @@ public class SQLiteDataStore implements DataStore {
             if (loadTradeStmt != null) loadTradeStmt.close();
             if (loadPlayerStmt != null) loadPlayerStmt.close();
             if (loadPlayerShopStmt != null) loadPlayerShopStmt.close();
-            if (loadShopStmt != null) loadShopStmt.close();
             if (upsertTradeStmt != null) upsertTradeStmt.close();
             if (deleteTradeStmt != null) deleteTradeStmt.close();
             if (deletePlayerStmt != null) deletePlayerStmt.close();

@@ -17,6 +17,7 @@ public class CooldownManager {
 
     private BukkitTask cleanupTask;
     private BukkitTask purgeTask;
+    private BukkitTask initialPurgeTask;
 
     public CooldownManager(ShopkeepersStockControl plugin, TradeDataManager tradeDataManager) {
         this.plugin = plugin;
@@ -42,6 +43,10 @@ public class CooldownManager {
         if (cleanupTask != null) {
             cleanupTask.cancel();
         }
+        if (initialPurgeTask != null) {
+            initialPurgeTask.cancel();
+            initialPurgeTask = null;
+        }
         if (purgeTask != null) {
             purgeTask.cancel();
             purgeTask = null;
@@ -59,6 +64,10 @@ public class CooldownManager {
         if (cleanupTask != null) {
             cleanupTask.cancel();
             cleanupTask = null;
+        }
+        if (initialPurgeTask != null) {
+            initialPurgeTask.cancel();
+            initialPurgeTask = null;
         }
         if (purgeTask != null) {
             purgeTask.cancel();
@@ -108,7 +117,10 @@ public class CooldownManager {
         if (purgeDays <= 0) return;
 
         // Initial purge 5 seconds after startup
-        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, this::performPurge, 100L);
+        initialPurgeTask = Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+            initialPurgeTask = null;
+            performPurge();
+        }, 100L);
 
         // Daily repeating purge (24 hours = 1,728,000 ticks)
         purgeTask = Bukkit.getScheduler().runTaskTimerAsynchronously(

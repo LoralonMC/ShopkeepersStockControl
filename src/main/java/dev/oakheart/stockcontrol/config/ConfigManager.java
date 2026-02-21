@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Level;
 
@@ -49,6 +50,32 @@ public class ConfigManager {
         this.shops = Collections.emptyMap();
     }
 
+    // Old snake_case -> new kebab-case key mappings for config.yml migration
+    private static final Map<String, String> CONFIG_KEY_MIGRATIONS = Map.of(
+            "storage_type", "storage-type",
+            "cooldown_check_interval", "cooldown-check-interval",
+            "cache_ttl", "cache-ttl",
+            "batch_write_interval", "batch-write-interval",
+            "purge_inactive_days", "purge-inactive-days"
+    );
+
+    // Old snake_case -> new kebab-case key mappings for message keys
+    private static final Map<String, String> MESSAGE_KEY_MIGRATIONS = Map.of(
+            "trade_limit_reached", "trade-limit-reached",
+            "trades_remaining", "trades-remaining",
+            "cooldown_active", "cooldown-active"
+    );
+
+    // Old snake_case -> new kebab-case key mappings for trades.yml shop/trade settings
+    private static final Map<String, String> TRADES_KEY_MIGRATIONS = Map.of(
+            "cooldown_mode", "cooldown-mode",
+            "reset_time", "reset-time",
+            "reset_day", "reset-day",
+            "stock_mode", "stock-mode",
+            "max_per_player", "max-per-player",
+            "max_trades", "max-trades"
+    );
+
     /**
      * Initial load of configuration. Called once during onEnable.
      */
@@ -63,11 +90,13 @@ public class ConfigManager {
 
         // Load config.yml
         config = YamlConfiguration.loadConfiguration(configFile);
+        migrateConfig();
         mergeDefaults();
         cacheValues();
 
         // Load trades.yml
         tradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
+        migrateTradesConfig();
 
         // Load shop configurations
         loadShops();
@@ -82,7 +111,7 @@ public class ConfigManager {
             if (defaultStream == null) return;
 
             YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
-                    new InputStreamReader(defaultStream));
+                    new InputStreamReader(defaultStream, StandardCharsets.UTF_8));
             config.setDefaults(defaults);
 
             if (hasNewKeys(defaults)) {
@@ -92,6 +121,133 @@ public class ConfigManager {
             }
         } catch (IOException e) {
             plugin.getLogger().log(Level.WARNING, "Failed to merge default config", e);
+        }
+    }
+
+    /**
+     * Migrates config.yml from v1 (snake_case) to v2 (kebab-case).
+     * Only runs if config-version is missing or < 2.
+     */
+    private void migrateConfig() {
+        int version = config.getInt("config-version", 1);
+        if (version >= 2) return;
+
+        plugin.getLogger().info("Migrating config.yml from v" + version + " to v2 (kebab-case keys)...");
+        boolean changed = false;
+
+        // Migrate top-level keys
+        for (Map.Entry<String, String> entry : CONFIG_KEY_MIGRATIONS.entrySet()) {
+            if (config.contains(entry.getKey(), true) && !config.contains(entry.getValue(), true)) {
+                config.set(entry.getValue(), config.get(entry.getKey()));
+                config.set(entry.getKey(), null);
+                changed = true;
+            }
+        }
+
+        // Migrate message keys under messages: (snake_case -> kebab-case)
+        ConfigurationSection messages = config.getConfigurationSection("messages");
+        if (messages != null) {
+            for (Map.Entry<String, String> entry : MESSAGE_KEY_MIGRATIONS.entrySet()) {
+                if (messages.contains(entry.getKey()) && !messages.contains(entry.getValue())) {
+                    messages.set(entry.getValue(), messages.get(entry.getKey()));
+                    messages.set(entry.getKey(), null);
+                    changed = true;
+                }
+            }
+        }
+
+        // Convert flat messages + message-display into nested text/display structure
+        // Re-fetch in case messages section was just created by key migrations above
+        messages = config.getConfigurationSection("messages");
+        ConfigurationSection messageDisplay = config.getConfigurationSection("message-display");
+        if (messageDisplay == null) {
+            messageDisplay = config.getConfigurationSection("message_display");
+        }
+
+        if (messages != null) {
+            for (String key : new ArrayList<>(messages.getKeys(false))) {
+                Object value = messages.get(key);
+                // Only convert flat strings — skip if already nested (has .text subkey)
+                if (value instanceof String text) {
+                    String display = messageDisplay != null ? messageDisplay.getString(key, "chat") : "chat";
+                    messages.set(key, null);
+                    messages.set(key + ".text", text);
+                    messages.set(key + ".display", display);
+                    changed = true;
+                }
+            }
+        }
+
+        // Remove the old message-display section
+        if (config.contains("message-display", true)) {
+            config.set("message-display", null);
+            changed = true;
+        }
+        if (config.contains("message_display", true)) {
+            config.set("message_display", null);
+            changed = true;
+        }
+
+        config.set("config-version", 2);
+        changed = true;
+
+        if (changed) {
+            try {
+                config.save(configFile);
+                plugin.getLogger().info("config.yml migrated to v2 successfully");
+            } catch (IOException e) {
+                plugin.getLogger().log(Level.WARNING, "Failed to save migrated config.yml", e);
+            }
+        }
+    }
+
+    /**
+     * Migrates trades.yml from snake_case to kebab-case keys.
+     * Checks each shop and trade section for old-style keys.
+     */
+    private void migrateTradesConfig() {
+        ConfigurationSection shopsSection = tradesConfig.getConfigurationSection("shops");
+        if (shopsSection == null) return;
+
+        boolean changed = false;
+        for (String shopId : shopsSection.getKeys(false)) {
+            ConfigurationSection shopSection = shopsSection.getConfigurationSection(shopId);
+            if (shopSection == null) continue;
+
+            // Migrate shop-level keys
+            for (Map.Entry<String, String> entry : TRADES_KEY_MIGRATIONS.entrySet()) {
+                if (shopSection.contains(entry.getKey()) && !shopSection.contains(entry.getValue())) {
+                    shopSection.set(entry.getValue(), shopSection.get(entry.getKey()));
+                    shopSection.set(entry.getKey(), null);
+                    changed = true;
+                }
+            }
+
+            // Migrate per-trade keys
+            ConfigurationSection tradesSection = shopSection.getConfigurationSection("trades");
+            if (tradesSection != null) {
+                for (String tradeKey : tradesSection.getKeys(false)) {
+                    ConfigurationSection tradeSection = tradesSection.getConfigurationSection(tradeKey);
+                    if (tradeSection == null) continue;
+
+                    for (Map.Entry<String, String> entry : TRADES_KEY_MIGRATIONS.entrySet()) {
+                        if (tradeSection.contains(entry.getKey()) && !tradeSection.contains(entry.getValue())) {
+                            tradeSection.set(entry.getValue(), tradeSection.get(entry.getKey()));
+                            tradeSection.set(entry.getKey(), null);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (changed) {
+            try {
+                tradesConfig.save(tradesFile);
+                plugin.getLogger().info("trades.yml migrated to kebab-case keys successfully");
+            } catch (IOException e) {
+                plugin.getLogger().log(Level.WARNING, "Failed to save migrated trades.yml", e);
+            }
         }
     }
 
@@ -110,12 +266,12 @@ public class ConfigManager {
      * Caches frequently accessed configuration values.
      */
     private void cacheValues() {
-        storageType = config.getString("storage_type", "sqlite");
-        cooldownCheckInterval = config.getInt("cooldown_check_interval", 60);
-        cacheTTL = config.getInt("cache_ttl", 10);
-        batchWriteInterval = config.getInt("batch_write_interval", 30);
+        storageType = config.getString("storage-type", "sqlite");
+        cooldownCheckInterval = config.getInt("cooldown-check-interval", 60);
+        cacheTTL = config.getInt("cache-ttl", 10);
+        batchWriteInterval = config.getInt("batch-write-interval", 30);
         debugMode = config.getBoolean("debug", false);
-        purgeInactiveDays = config.getInt("purge_inactive_days", 0);
+        purgeInactiveDays = config.getInt("purge-inactive-days", 0);
     }
 
     /**
@@ -211,13 +367,14 @@ public class ConfigManager {
             boolean enabled = shopSection.getBoolean("enabled", true);
 
             // Per-shop cooldown settings
-            CooldownMode cooldownMode = CooldownMode.fromString(shopSection.getString("cooldown_mode", "rolling"));
-            String resetTime = shopSection.getString("reset_time", "00:00");
-            String resetDay = shopSection.getString("reset_day", "monday").toUpperCase();
+            CooldownMode cooldownMode = CooldownMode.fromString(shopSection.getString("cooldown-mode", "rolling"));
+            String resetTime = shopSection.getString("reset-time", "00:00");
+            String rawResetDay = shopSection.getString("reset-day", "monday");
+            String resetDay = rawResetDay != null ? rawResetDay.toUpperCase() : "MONDAY";
 
             // Stock mode settings
-            StockMode stockMode = StockMode.fromString(shopSection.getString("stock_mode", "per_player"));
-            int shopMaxPerPlayer = shopSection.getInt("max_per_player", 0);
+            StockMode stockMode = StockMode.fromString(shopSection.getString("stock-mode", "per_player"));
+            int shopMaxPerPlayer = shopSection.getInt("max-per-player", 0);
 
             Map<String, TradeConfig> trades = new HashMap<>();
             ConfigurationSection tradesSection = shopSection.getConfigurationSection("trades");
@@ -227,25 +384,24 @@ public class ConfigManager {
                     if (tradeSection == null) continue;
 
                     int slot = tradeSection.getInt("slot", -1);
-                    int maxTrades = tradeSection.getInt("max_trades", 1);
+                    int maxTrades = tradeSection.getInt("max-trades", 1);
                     int cooldown = tradeSection.getInt("cooldown", 86400);
 
                     // Per-trade cooldown settings with shop-level fallback
-                    CooldownMode tradeCooldownMode = tradeSection.contains("cooldown_mode")
-                            ? CooldownMode.fromString(tradeSection.getString("cooldown_mode"))
+                    CooldownMode tradeCooldownMode = tradeSection.contains("cooldown-mode")
+                            ? CooldownMode.fromString(tradeSection.getString("cooldown-mode"))
                             : cooldownMode;
-                    String tradeResetTime = tradeSection.getString("reset_time", resetTime);
-                    String tradeResetDay = tradeSection.contains("reset_day")
-                            ? tradeSection.getString("reset_day").toUpperCase()
-                            : resetDay;
+                    String tradeResetTime = tradeSection.getString("reset-time", resetTime);
+                    String rawTradeResetDay = tradeSection.getString("reset-day");
+                    String tradeResetDay = rawTradeResetDay != null ? rawTradeResetDay.toUpperCase() : resetDay;
 
-                    int tradeMaxPerPlayer = tradeSection.contains("max_per_player")
-                            ? tradeSection.getInt("max_per_player", 0)
+                    int tradeMaxPerPlayer = tradeSection.contains("max-per-player")
+                            ? tradeSection.getInt("max-per-player", 0)
                             : shopMaxPerPlayer;
 
                     if (isDebugMode()) {
                         plugin.getLogger().info("Loading trade '" + tradeKey + "' for shop " + shopId +
-                                ": slot=" + slot + ", max_trades=" + maxTrades + ", cooldown=" + cooldown +
+                                ": slot=" + slot + ", max-trades=" + maxTrades + ", cooldown=" + cooldown +
                                 ", mode=" + tradeCooldownMode);
                     }
 
@@ -271,7 +427,7 @@ public class ConfigManager {
      * @return Set of error messages (empty if valid)
      */
     private Set<String> validateShops(Map<String, ShopConfig> shopsToValidate) {
-        Set<String> errors = new HashSet<>();
+        Set<String> errors = new LinkedHashSet<>();
 
         for (ShopConfig shop : shopsToValidate.values()) {
             Set<Integer> usedSlots = new HashSet<>();
@@ -290,7 +446,7 @@ public class ConfigManager {
 
                 // Validate positive values
                 if (trade.getMaxTrades() <= 0) {
-                    errors.add("Trade '" + trade.getTradeKey() + "': max_trades must be > 0");
+                    errors.add("Trade '" + trade.getTradeKey() + "': max-trades must be > 0");
                 }
                 if (trade.getCooldownMode() == CooldownMode.ROLLING && trade.getCooldownSeconds() <= 0) {
                     errors.add("Trade '" + trade.getTradeKey() + "': cooldown must be > 0 for rolling mode");
@@ -300,13 +456,13 @@ public class ConfigManager {
                 }
                 if (trade.getMaxPerPlayer() < 0) {
                     errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                            + "': max_per_player must be >= 0");
+                            + "': max-per-player must be >= 0");
                 }
                 if (trade.getMaxPerPlayer() > 0 && trade.getMaxPerPlayer() > trade.getMaxTrades()
                         && shop.isShared()) {
                     errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                            + "': max_per_player (" + trade.getMaxPerPlayer()
-                            + ") exceeds max_trades (" + trade.getMaxTrades() + ")");
+                            + "': max-per-player (" + trade.getMaxPerPlayer()
+                            + ") exceeds max-trades (" + trade.getMaxTrades() + ")");
                 }
 
                 // Validate per-trade cooldown settings
@@ -315,13 +471,13 @@ public class ConfigManager {
                     String tradeResetTime = trade.getResetTime();
                     if (!tradeResetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
                         errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                                + "': reset_time must be in HH:mm format (00:00 to 23:59). Current: '" + tradeResetTime + "'");
+                                + "': reset-time must be in HH:mm format (00:00 to 23:59). Current: '" + tradeResetTime + "'");
                     }
                 }
                 if (mode == CooldownMode.WEEKLY) {
                     if (!VALID_DAYS.contains(trade.getResetDay())) {
                         errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                                + "': reset_day must be a valid day of the week. Current: '" + trade.getResetDay() + "'");
+                                + "': reset-day must be a valid day of the week. Current: '" + trade.getResetDay() + "'");
                     }
                 }
             }
@@ -336,39 +492,43 @@ public class ConfigManager {
      * @return Set of warning messages
      */
     private Set<String> validateMainConfig() {
-        Set<String> warnings = new HashSet<>();
+        Set<String> warnings = new LinkedHashSet<>();
 
         // Validate numeric ranges
         if (cooldownCheckInterval < 10 || cooldownCheckInterval > 3600) {
-            warnings.add("cooldown_check_interval should be between 10-3600 seconds (currently: " + cooldownCheckInterval + ")");
+            warnings.add("cooldown-check-interval should be between 10-3600 seconds (currently: " + cooldownCheckInterval + ")");
         }
 
         if (cacheTTL < 5 || cacheTTL > 300) {
-            warnings.add("cache_ttl should be between 5-300 seconds (currently: " + cacheTTL + ")");
+            warnings.add("cache-ttl should be between 5-300 seconds (currently: " + cacheTTL + ")");
         }
 
         if (batchWriteInterval < 5 || batchWriteInterval > 300) {
-            warnings.add("batch_write_interval should be between 5-300 seconds (currently: " + batchWriteInterval + ")");
+            warnings.add("batch-write-interval should be between 5-300 seconds (currently: " + batchWriteInterval + ")");
         }
 
-        // Validate required message keys exist
-        String[] requiredMessages = {
+        // Validate player-facing messages with display mode
+        String[] playerMessages = {
                 TRADE_LIMIT_REACHED, TRADES_REMAINING, COOLDOWN_ACTIVE
         };
 
-        for (String messageKey : requiredMessages) {
-            if (!config.contains("messages." + messageKey)) {
-                warnings.add("Missing message key: messages." + messageKey);
+        for (String messageKey : playerMessages) {
+            if (!config.contains("messages." + messageKey + ".text")) {
+                warnings.add("Missing message key: messages." + messageKey + ".text");
+            }
+            String display = config.getString("messages." + messageKey + ".display", "chat");
+            if (!"chat".equals(display) && !"action_bar".equals(display)) {
+                warnings.add("messages." + messageKey + ".display must be 'chat' or 'action_bar' (currently: '" + display + "')");
             }
         }
 
         if (purgeInactiveDays < 0) {
-            warnings.add("purge_inactive_days must be >= 0 (0 to disable). Currently: " + purgeInactiveDays);
+            warnings.add("purge-inactive-days must be >= 0 (0 to disable). Currently: " + purgeInactiveDays);
         }
 
         // Validate storage type
         if (!storageType.equalsIgnoreCase("sqlite")) {
-            warnings.add("storage_type '" + storageType + "' is not supported. Only 'sqlite' is currently supported.");
+            warnings.add("storage-type '" + storageType + "' is not supported. Only 'sqlite' is currently supported.");
         }
 
         return warnings;
@@ -407,11 +567,26 @@ public class ConfigManager {
     }
 
     public String getMessage(String key) {
-        return config.getString("messages." + key, "<red>Message not found: " + key);
+        return config.getString("messages." + key + ".text", "<red>Message not found: " + key);
     }
 
     public String getMessageDisplay(String key) {
-        return config.getString("message_display." + key, "chat");
+        return config.getString("messages." + key + ".display", "chat");
+    }
+
+    /**
+     * Gets a message as a list of lines (for YAML list format).
+     * If the config value is a String, wraps it in a single-element list.
+     * Returns null if the key is missing or the text is blank.
+     */
+    public List<String> getMessageList(String key) {
+        String path = "messages." + key + ".text";
+        if (config.isList(path)) {
+            return config.getStringList(path);
+        }
+        String text = config.getString(path);
+        if (text == null || text.isBlank()) return null;
+        return List.of(text);
     }
 
     public Map<String, ShopConfig> getShops() {

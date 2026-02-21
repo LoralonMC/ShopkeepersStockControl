@@ -11,6 +11,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 
 /**
  * Manages player trade data including cooldowns, limits, and persistence.
@@ -100,7 +101,88 @@ public class TradeDataManager {
     // ===== Core Trade Logic =====
 
     /**
+     * Resets expired cooldowns on a player's trade data if applicable.
+     * Called before recording a trade to ensure state is current.
+     * Separated from canTrade() to keep the check pure (read-only).
+     *
+     * @param playerId The player's UUID
+     * @param shopId   The shop identifier
+     * @param tradeKey The trade key
+     */
+    public void resetIfExpired(UUID playerId, String shopId, String tradeKey) {
+        ShopConfig shopConfig = plugin.getConfigManager().getShop(shopId);
+        if (shopConfig != null && shopConfig.isShared()) {
+            resetIfExpiredShared(playerId, shopId, tradeKey, shopConfig);
+            return;
+        }
+
+        PlayerTradeData data = getTradeData(playerId, shopId, tradeKey);
+        if (data == null) return;
+
+        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
+        CooldownMode mode = tradeConfig != null ? tradeConfig.getCooldownMode() : CooldownMode.ROLLING;
+        long now = System.currentTimeMillis() / 1000;
+
+        switch (mode) {
+            case DAILY:
+            case WEEKLY:
+                if (isExpired(data, tradeConfig)) {
+                    data.setTradesUsed(0);
+                    data.setLastResetEpoch(now);
+                    markDirty(data.getCacheKey());
+                }
+                break;
+            case ROLLING:
+                long elapsed = now - data.getLastResetEpoch();
+                if (elapsed < 0) elapsed = 0;
+                if (elapsed >= data.getCooldownSeconds()) {
+                    data.setTradesUsed(0);
+                    data.setLastResetEpoch(now);
+                    markDirty(data.getCacheKey());
+                }
+                break;
+            case NONE:
+            default:
+                break;
+        }
+    }
+
+    /**
+     * Resets expired cooldowns for shared-mode shops.
+     */
+    private void resetIfExpiredShared(UUID playerId, String shopId, String tradeKey, ShopConfig shopConfig) {
+        TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
+        if (tradeConfig == null) return;
+
+        long now = System.currentTimeMillis() / 1000;
+
+        // Reset global stock if expired
+        GlobalTradeData globalData = getGlobalTradeData(shopId, tradeKey);
+        if (globalData != null && tradeConfig.getCooldownMode() != CooldownMode.NONE) {
+            if (isGlobalExpired(globalData, tradeConfig)) {
+                globalData.setTradesUsed(0);
+                globalData.setLastResetEpoch(now);
+                globalDirtyKeys.add(globalData.getCacheKey());
+            }
+        }
+
+        // Reset per-player cap if expired
+        int maxPerPlayer = tradeConfig.getMaxPerPlayer();
+        if (maxPerPlayer > 0) {
+            PlayerTradeData playerData = getTradeData(playerId, shopId, tradeKey);
+            if (playerData != null && tradeConfig.getCooldownMode() != CooldownMode.NONE
+                    && isExpired(playerData, tradeConfig)) {
+                playerData.setTradesUsed(0);
+                playerData.setLastResetEpoch(now);
+                markDirty(playerData.getCacheKey());
+            }
+        }
+    }
+
+    /**
      * Checks if a player can perform a trade (considering cooldowns and limits).
+     * This is a pure read-only check — call resetIfExpired() before this to ensure
+     * expired cooldowns are cleared.
      *
      * @param playerId The player's UUID
      * @param shopId   The shop identifier
@@ -121,62 +203,19 @@ public class TradeDataManager {
             return true;
         }
 
-        long now = System.currentTimeMillis() / 1000;
-        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
-        CooldownMode mode = tradeConfig != null ? tradeConfig.getCooldownMode() : CooldownMode.ROLLING;
-
-        switch (mode) {
-            case DAILY:
-            case WEEKLY:
-                if (hasCooldownExpired(playerId, shopId, tradeKey)) {
-                    data.setTradesUsed(0);
-                    data.setLastResetEpoch(now);
-                    markDirty(data.getCacheKey());
-                    return true;
-                }
-                break;
-
-            case NONE:
-                // Never resets — just check if under limit
-                break;
-
-            case ROLLING:
-            default:
-                long elapsed = now - data.getLastResetEpoch();
-                if (elapsed < 0) elapsed = 0;
-                if (elapsed >= data.getCooldownSeconds()) {
-                    data.setTradesUsed(0);
-                    data.setLastResetEpoch(now);
-                    markDirty(data.getCacheKey());
-                    return true;
-                }
-                break;
-        }
-
         int limit = getTradeLimit(shopId, tradeKey);
         return data.getTradesUsed() < limit;
     }
 
     /**
-     * Checks if a player can trade in a shared-mode shop.
+     * Checks if a player can trade in a shared-mode shop (pure read-only).
      */
     private boolean canTradeShared(UUID playerId, String shopId, String tradeKey, ShopConfig shopConfig) {
         TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
         if (tradeConfig == null) return true; // Untracked trade
 
-        long now = System.currentTimeMillis() / 1000;
-
-        // Check and potentially reset global stock
-        GlobalTradeData globalData = getGlobalTradeData(shopId, tradeKey);
-        if (globalData != null && tradeConfig.getCooldownMode() != CooldownMode.NONE) {
-            if (isGlobalExpired(globalData, tradeConfig)) {
-                globalData.setTradesUsed(0);
-                globalData.setLastResetEpoch(now);
-                globalDirtyKeys.add(globalData.getCacheKey());
-            }
-        }
-
         // Check global stock
+        GlobalTradeData globalData = getGlobalTradeData(shopId, tradeKey);
         int globalUsed = globalData != null ? globalData.getTradesUsed() : 0;
         if (globalUsed >= tradeConfig.getMaxTrades()) {
             return false;
@@ -186,15 +225,8 @@ public class TradeDataManager {
         int maxPerPlayer = tradeConfig.getMaxPerPlayer();
         if (maxPerPlayer > 0) {
             PlayerTradeData playerData = getTradeData(playerId, shopId, tradeKey);
-            if (playerData != null) {
-                // Reset per-player data if cooldown expired (and not NONE)
-                if (tradeConfig.getCooldownMode() != CooldownMode.NONE && isExpired(playerData, tradeConfig)) {
-                    playerData.setTradesUsed(0);
-                    playerData.setLastResetEpoch(now);
-                    markDirty(playerData.getCacheKey());
-                } else if (playerData.getTradesUsed() >= maxPerPlayer) {
-                    return false;
-                }
+            if (playerData != null && playerData.getTradesUsed() >= maxPerPlayer) {
+                return false;
             }
         }
 
@@ -733,26 +765,31 @@ public class TradeDataManager {
         ShopConfig shopConfig = plugin.getConfigManager().getShop(shopId);
         if (shopConfig == null) return;
 
-        CompletableFuture.runAsync(() -> {
-            // Always pre-load player data (for per-player mode or per-player caps in shared mode)
-            List<PlayerTradeData> trades = dataStore.loadPlayerShopData(playerId, shopId);
-            for (PlayerTradeData data : trades) {
-                String cacheKey = data.getCacheKey();
-                tradeCache.putIfAbsent(cacheKey, data);
-                trackCacheKey(playerId, cacheKey);
-            }
-
-            // For shared shops, also pre-load global trade data
-            if (shopConfig.isShared()) {
-                List<GlobalTradeData> globalTrades = dataStore.loadGlobalShopData(shopId);
-                for (GlobalTradeData data : globalTrades) {
-                    globalTradeCache.putIfAbsent(data.getCacheKey(), data);
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                // Always pre-load player data (for per-player mode or per-player caps in shared mode)
+                List<PlayerTradeData> trades = dataStore.loadPlayerShopData(playerId, shopId);
+                for (PlayerTradeData data : trades) {
+                    String cacheKey = data.getCacheKey();
+                    tradeCache.putIfAbsent(cacheKey, data);
+                    trackCacheKey(playerId, cacheKey);
                 }
-            }
 
-            if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("Pre-loaded " + trades.size() +
-                        " trade entries for " + playerId + " in shop " + shopId);
+                // For shared shops, also pre-load global trade data
+                if (shopConfig.isShared()) {
+                    List<GlobalTradeData> globalTrades = dataStore.loadGlobalShopData(shopId);
+                    for (GlobalTradeData data : globalTrades) {
+                        globalTradeCache.putIfAbsent(data.getCacheKey(), data);
+                    }
+                }
+
+                if (plugin.getConfigManager().isDebugMode()) {
+                    plugin.getLogger().info("Pre-loaded " + trades.size() +
+                            " trade entries for " + playerId + " in shop " + shopId);
+                }
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Failed to pre-load trade data for " + playerId + " in shop " + shopId, e);
             }
         });
     }
@@ -790,15 +827,29 @@ public class TradeDataManager {
 
     /**
      * Evicts a player's data from cache (e.g., on player quit).
+     * Flushes dirty data asynchronously to avoid blocking the main thread.
      */
     public void evictPlayer(UUID playerId) {
-        flushPlayerData(playerId);
-
+        // Collect dirty data before removing from cache (must happen on main thread)
         Set<String> keys = playerCacheKeys.remove(playerId);
+        List<PlayerTradeData> dataToFlush = new ArrayList<>();
+
         if (keys != null) {
             for (String key : keys) {
+                if (dirtyKeys.remove(key)) {
+                    PlayerTradeData data = tradeCache.get(key);
+                    if (data != null) {
+                        dataToFlush.add(data);
+                    }
+                }
                 tradeCache.remove(key);
             }
+        }
+
+        // Flush asynchronously to avoid blocking the main thread
+        if (!dataToFlush.isEmpty()) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin,
+                    () -> dataStore.batchSaveTradeData(dataToFlush));
         }
 
         if (plugin.getConfigManager().isDebugMode()) {
@@ -869,6 +920,8 @@ public class TradeDataManager {
 
     /**
      * Purges trade data for players who haven't logged in within the configured threshold.
+     * Collects player UUIDs from the database async, resolves last-played times on the main
+     * thread (Bukkit API safety), then deletes on an async thread.
      *
      * @return CompletableFuture resolving to the number of players purged
      */
@@ -879,32 +932,46 @@ public class TradeDataManager {
         }
 
         long thresholdMillis = System.currentTimeMillis() - (purgeDays * 86_400_000L);
+        CompletableFuture<Integer> future = new CompletableFuture<>();
 
-        return CompletableFuture.supplyAsync(() -> {
+        // Step 1: Load all player UUIDs from DB (async-safe — synchronized DB method)
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             List<UUID> allPlayers = dataStore.getAllPlayers();
-            int purged = 0;
 
-            for (UUID playerId : allPlayers) {
-                long lastPlayed = Bukkit.getOfflinePlayer(playerId).getLastPlayed();
+            // Step 2: Resolve last-played on main thread (Bukkit API safety)
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                List<UUID> toPurge = new ArrayList<>();
+                for (UUID playerId : allPlayers) {
+                    long lastPlayed = Bukkit.getOfflinePlayer(playerId).getLastSeen();
+                    if (lastPlayed > 0 && lastPlayed < thresholdMillis) {
+                        toPurge.add(playerId);
 
-                if (lastPlayed > 0 && lastPlayed < thresholdMillis) {
-                    // Evict from cache
-                    Set<String> keys = playerCacheKeys.remove(playerId);
-                    if (keys != null) {
-                        for (String key : keys) {
-                            tradeCache.remove(key);
-                            dirtyKeys.remove(key);
+                        // Evict from cache (main thread — safe to modify caches)
+                        Set<String> keys = playerCacheKeys.remove(playerId);
+                        if (keys != null) {
+                            for (String key : keys) {
+                                tradeCache.remove(key);
+                                dirtyKeys.remove(key);
+                            }
                         }
                     }
-
-                    // Delete from database
-                    dataStore.deletePlayerData(playerId);
-                    purged++;
                 }
-            }
 
-            return purged;
+                // Step 3: Delete from database async
+                if (!toPurge.isEmpty()) {
+                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                        for (UUID playerId : toPurge) {
+                            dataStore.deletePlayerData(playerId);
+                        }
+                        future.complete(toPurge.size());
+                    });
+                } else {
+                    future.complete(0);
+                }
+            });
         });
+
+        return future;
     }
 
     // ===== Flush / Persistence =====

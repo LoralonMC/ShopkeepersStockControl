@@ -46,14 +46,6 @@ public interface DataStore {
     List<PlayerTradeData> loadPlayerShopData(UUID playerId, String shopId);
 
     /**
-     * Loads all trade data for a specific shop.
-     *
-     * @param shopId The shop identifier
-     * @return List of PlayerTradeData
-     */
-    List<PlayerTradeData> loadShopData(String shopId);
-
-    /**
      * Saves or updates trade data using UPSERT logic.
      *
      * @param data The trade data to save
