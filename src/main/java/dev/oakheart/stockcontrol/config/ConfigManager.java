@@ -11,23 +11,18 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Level;
 
-import static dev.oakheart.stockcontrol.message.MessageManager.*;
-
 /**
  * Manages plugin configuration including main config and trades config.
- * Uses Bukkit's FileConfiguration (YamlConfiguration) for all YAML operations.
+ * Uses OakheartLib's ConfigManager for config.yml and Bukkit's FileConfiguration for trades.yml.
  */
 public class ConfigManager {
     private final ShopkeepersStockControl plugin;
     private final File configFile;
     private final File tradesFile;
-    private FileConfiguration config;
+    private dev.oakheart.config.ConfigManager config;
     private FileConfiguration tradesConfig;
     private volatile Map<String, ShopConfig> shops;
 
@@ -49,22 +44,6 @@ public class ConfigManager {
         this.tradesFile = new File(plugin.getDataFolder(), "trades.yml");
         this.shops = Collections.emptyMap();
     }
-
-    // Old snake_case -> new kebab-case key mappings for config.yml migration
-    private static final Map<String, String> CONFIG_KEY_MIGRATIONS = Map.of(
-            "storage_type", "storage-type",
-            "cooldown_check_interval", "cooldown-check-interval",
-            "cache_ttl", "cache-ttl",
-            "batch_write_interval", "batch-write-interval",
-            "purge_inactive_days", "purge-inactive-days"
-    );
-
-    // Old snake_case -> new kebab-case key mappings for message keys
-    private static final Map<String, String> MESSAGE_KEY_MIGRATIONS = Map.of(
-            "trade_limit_reached", "trade-limit-reached",
-            "trades_remaining", "trades-remaining",
-            "cooldown_active", "cooldown-active"
-    );
 
     // Old snake_case -> new kebab-case key mappings for trades.yml shop/trade settings
     private static final Map<String, String> TRADES_KEY_MIGRATIONS = Map.of(
@@ -88,9 +67,12 @@ public class ConfigManager {
             plugin.saveResource("trades.yml", false);
         }
 
-        // Load config.yml
-        config = YamlConfiguration.loadConfiguration(configFile);
-        migrateConfig();
+        // Load config.yml with OakheartLib
+        try {
+            config = dev.oakheart.config.ConfigManager.load(configFile.toPath());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load config.yml", e);
+        }
         mergeDefaults();
         cacheValues();
 
@@ -107,97 +89,16 @@ public class ConfigManager {
      * without overwriting existing values. Only saves when new keys are found.
      */
     private void mergeDefaults() {
-        try (InputStream defaultStream = plugin.getResource("config.yml")) {
+        try (var defaultStream = plugin.getResource("config.yml")) {
             if (defaultStream == null) return;
 
-            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
-                    new InputStreamReader(defaultStream, StandardCharsets.UTF_8));
-            config.setDefaults(defaults);
-
-            if (hasNewKeys(defaults)) {
-                config.options().copyDefaults(true);
-                config.save(configFile);
+            var defaults = dev.oakheart.config.ConfigManager.fromStream(defaultStream);
+            if (config.mergeDefaults(defaults)) {
+                config.save();
                 plugin.getLogger().info("Merged missing default config keys");
             }
         } catch (IOException e) {
             plugin.getLogger().log(Level.WARNING, "Failed to merge default config", e);
-        }
-    }
-
-    /**
-     * Migrates config.yml from v1 (snake_case) to v2 (kebab-case).
-     * Only runs if config-version is missing or < 2.
-     */
-    private void migrateConfig() {
-        int version = config.getInt("config-version", 1);
-        if (version >= 2) return;
-
-        plugin.getLogger().info("Migrating config.yml from v" + version + " to v2 (kebab-case keys)...");
-        boolean changed = false;
-
-        // Migrate top-level keys
-        for (Map.Entry<String, String> entry : CONFIG_KEY_MIGRATIONS.entrySet()) {
-            if (config.contains(entry.getKey(), true) && !config.contains(entry.getValue(), true)) {
-                config.set(entry.getValue(), config.get(entry.getKey()));
-                config.set(entry.getKey(), null);
-                changed = true;
-            }
-        }
-
-        // Migrate message keys under messages: (snake_case -> kebab-case)
-        ConfigurationSection messages = config.getConfigurationSection("messages");
-        if (messages != null) {
-            for (Map.Entry<String, String> entry : MESSAGE_KEY_MIGRATIONS.entrySet()) {
-                if (messages.contains(entry.getKey()) && !messages.contains(entry.getValue())) {
-                    messages.set(entry.getValue(), messages.get(entry.getKey()));
-                    messages.set(entry.getKey(), null);
-                    changed = true;
-                }
-            }
-        }
-
-        // Convert flat messages + message-display into nested text/display structure
-        // Re-fetch in case messages section was just created by key migrations above
-        messages = config.getConfigurationSection("messages");
-        ConfigurationSection messageDisplay = config.getConfigurationSection("message-display");
-        if (messageDisplay == null) {
-            messageDisplay = config.getConfigurationSection("message_display");
-        }
-
-        if (messages != null) {
-            for (String key : new ArrayList<>(messages.getKeys(false))) {
-                Object value = messages.get(key);
-                // Only convert flat strings — skip if already nested (has .text subkey)
-                if (value instanceof String text) {
-                    String display = messageDisplay != null ? messageDisplay.getString(key, "chat") : "chat";
-                    messages.set(key, null);
-                    messages.set(key + ".text", text);
-                    messages.set(key + ".display", display);
-                    changed = true;
-                }
-            }
-        }
-
-        // Remove the old message-display section
-        if (config.contains("message-display", true)) {
-            config.set("message-display", null);
-            changed = true;
-        }
-        if (config.contains("message_display", true)) {
-            config.set("message_display", null);
-            changed = true;
-        }
-
-        config.set("config-version", 2);
-        changed = true;
-
-        if (changed) {
-            try {
-                config.save(configFile);
-                plugin.getLogger().info("config.yml migrated to v2 successfully");
-            } catch (IOException e) {
-                plugin.getLogger().log(Level.WARNING, "Failed to save migrated config.yml", e);
-            }
         }
     }
 
@@ -252,17 +153,6 @@ public class ConfigManager {
     }
 
     /**
-     * Checks if the defaults contain any keys not present in the user's config.
-     */
-    private boolean hasNewKeys(YamlConfiguration defaults) {
-        for (String key : defaults.getKeys(true)) {
-            if (defaults.isConfigurationSection(key)) continue;
-            if (!config.contains(key, true)) return true;
-        }
-        return false;
-    }
-
-    /**
      * Caches frequently accessed configuration values.
      */
     private void cacheValues() {
@@ -281,7 +171,7 @@ public class ConfigManager {
      */
     public boolean reload() {
         try {
-            FileConfiguration newConfig = YamlConfiguration.loadConfiguration(configFile);
+            config.reload();
             FileConfiguration newTradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
 
             // Load new shop configurations
@@ -308,7 +198,6 @@ public class ConfigManager {
             }
 
             // Atomically swap configurations
-            this.config = newConfig;
             this.tradesConfig = newTradesConfig;
             this.shops = Collections.unmodifiableMap(newShops);
             cacheValues();
@@ -507,21 +396,6 @@ public class ConfigManager {
             warnings.add("batch-write-interval should be between 5-300 seconds (currently: " + batchWriteInterval + ")");
         }
 
-        // Validate player-facing messages with display mode
-        String[] playerMessages = {
-                TRADE_LIMIT_REACHED, TRADES_REMAINING, COOLDOWN_ACTIVE
-        };
-
-        for (String messageKey : playerMessages) {
-            if (!config.contains("messages." + messageKey + ".text")) {
-                warnings.add("Missing message key: messages." + messageKey + ".text");
-            }
-            String display = config.getString("messages." + messageKey + ".display", "chat");
-            if (!"chat".equals(display) && !"action_bar".equals(display)) {
-                warnings.add("messages." + messageKey + ".display must be 'chat' or 'action_bar' (currently: '" + display + "')");
-            }
-        }
-
         if (purgeInactiveDays < 0) {
             warnings.add("purge-inactive-days must be >= 0 (0 to disable). Currently: " + purgeInactiveDays);
         }
@@ -553,7 +427,7 @@ public class ConfigManager {
 
     /**
      * Toggles debug mode for the current session.
-     * Does not save to disk to avoid SnakeYAML reformatting the config file.
+     * Does not save to disk to avoid reformatting the config file.
      * The value resets to whatever is in config.yml on next server restart or reload.
      *
      * @param enabled Whether debug mode should be enabled
@@ -564,29 +438,6 @@ public class ConfigManager {
 
     public boolean isDebugMode() {
         return debugMode;
-    }
-
-    public String getMessage(String key) {
-        return config.getString("messages." + key + ".text", "<red>Message not found: " + key);
-    }
-
-    public String getMessageDisplay(String key) {
-        return config.getString("messages." + key + ".display", "chat");
-    }
-
-    /**
-     * Gets a message as a list of lines (for YAML list format).
-     * If the config value is a String, wraps it in a single-element list.
-     * Returns null if the key is missing or the text is blank.
-     */
-    public List<String> getMessageList(String key) {
-        String path = "messages." + key + ".text";
-        if (config.isList(path)) {
-            return config.getStringList(path);
-        }
-        String text = config.getString(path);
-        if (text == null || text.isBlank()) return null;
-        return List.of(text);
     }
 
     public Map<String, ShopConfig> getShops() {

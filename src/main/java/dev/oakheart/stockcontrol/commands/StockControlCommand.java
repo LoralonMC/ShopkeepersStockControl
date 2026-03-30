@@ -3,25 +3,26 @@ package dev.oakheart.stockcontrol.commands;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.tree.LiteralCommandNode;
+import dev.oakheart.command.CommandRegistrar;
+import dev.oakheart.message.MessageManager;
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.data.*;
-import dev.oakheart.stockcontrol.message.MessageManager;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
-import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
-import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @SuppressWarnings("UnstableApiUsage")
 public class StockControlCommand {
+
+    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
 
     private final ShopkeepersStockControl plugin;
     private final MessageManager messageManager;
@@ -32,12 +33,9 @@ public class StockControlCommand {
     }
 
     public void register() {
-        LifecycleEventManager<Plugin> manager = plugin.getLifecycleManager();
-        manager.registerEventHandler(LifecycleEvents.COMMANDS, event -> {
-            Commands commands = event.registrar();
-            commands.register(buildCommand(), "ShopkeepersStockControl main command",
-                    List.of("shopkeepersstock", "stockcontrol"));
-        });
+        CommandRegistrar.register(plugin, buildCommand(),
+                "ShopkeepersStockControl main command",
+                List.of("shopkeepersstock", "stockcontrol"));
     }
 
     private LiteralCommandNode<CommandSourceStack> buildCommand() {
@@ -252,20 +250,26 @@ public class StockControlCommand {
     // ===== Help =====
 
     private void sendHelp(CommandSender sender) {
-        messageManager.sendMultiline(sender, MessageManager.HELP);
+        List<String> lines = messageManager.getConfig().getStringList("commands.help");
+        if (lines.isEmpty()) return;
+        for (String line : lines) {
+            if (line != null && !line.isBlank()) {
+                sender.sendMessage(MINI_MESSAGE.deserialize(line));
+            }
+        }
     }
 
     // ===== Reload =====
 
     private void handleReload(CommandSender sender) {
-        messageManager.send(sender, MessageManager.RELOAD_START);
+        messageManager.sendCommand(sender, "reload-start");
 
         boolean success = plugin.reloadPluginConfig();
 
         if (success) {
-            messageManager.send(sender, MessageManager.RELOAD_SUCCESS);
+            messageManager.sendCommand(sender, "reload-success");
         } else {
-            messageManager.send(sender, MessageManager.RELOAD_FAILED);
+            messageManager.sendCommand(sender, "reload-failed");
         }
     }
 
@@ -278,21 +282,21 @@ public class StockControlCommand {
         plugin.getConfigManager().setDebugMode(newDebug);
 
         if (newDebug) {
-            messageManager.send(sender, MessageManager.DEBUG_ENABLED);
+            messageManager.sendCommand(sender, "debug-enabled");
         } else {
-            messageManager.send(sender, MessageManager.DEBUG_DISABLED);
+            messageManager.sendCommand(sender, "debug-disabled");
         }
     }
 
     // ===== Cleanup =====
 
     private void handleCleanup(CommandSender sender) {
-        messageManager.send(sender, MessageManager.CLEANUP_START);
+        messageManager.sendCommand(sender, "cleanup-start");
 
         int cleaned = plugin.getCooldownManager().triggerManualCleanup();
 
-        messageManager.send(sender, MessageManager.CLEANUP_COMPLETE,
-                Map.of("count", String.valueOf(cleaned)));
+        messageManager.sendCommand(sender, "cleanup-complete",
+                Placeholder.unparsed("count", String.valueOf(cleaned)));
     }
 
     // ===== Info =====
@@ -300,7 +304,8 @@ public class StockControlCommand {
     private void handleInfo(CommandSender sender, String shopArg) {
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
@@ -308,31 +313,31 @@ public class StockControlCommand {
                 ? shop.getShopId().substring(0, 8) + "..."
                 : shop.getShopId();
 
-        messageManager.send(sender, MessageManager.INFO_HEADER, Map.of("name", shop.getName()));
-        messageManager.send(sender, MessageManager.INFO_ID, Map.of("id", shortId));
-        messageManager.send(sender, MessageManager.INFO_ENABLED, Map.of("enabled", String.valueOf(shop.isEnabled())));
-        messageManager.send(sender, MessageManager.INFO_STOCK_MODE, Map.of("mode", shop.getStockMode().name().toLowerCase()));
+        messageManager.sendCommand(sender, "info-header", Placeholder.unparsed("name", shop.getName()));
+        messageManager.sendCommand(sender, "info-id", Placeholder.unparsed("id", shortId));
+        messageManager.sendCommand(sender, "info-enabled", Placeholder.unparsed("enabled", String.valueOf(shop.isEnabled())));
+        messageManager.sendCommand(sender, "info-stock-mode", Placeholder.unparsed("mode", shop.getStockMode().name().toLowerCase()));
 
         String cooldownDisplay = shop.getCooldownMode() == CooldownMode.NONE
                 ? "none (manual restock)"
                 : shop.getCooldownMode().name().toLowerCase();
-        messageManager.send(sender, MessageManager.INFO_COOLDOWN_MODE, Map.of("mode", cooldownDisplay));
+        messageManager.sendCommand(sender, "info-cooldown-mode", Placeholder.unparsed("mode", cooldownDisplay));
 
         if (shop.getCooldownMode() == CooldownMode.DAILY || shop.getCooldownMode() == CooldownMode.WEEKLY) {
-            messageManager.send(sender, MessageManager.INFO_RESET_TIME, Map.of("time", shop.getResetTime()));
+            messageManager.sendCommand(sender, "info-reset-time", Placeholder.unparsed("time", shop.getResetTime()));
         }
         if (shop.getCooldownMode() == CooldownMode.WEEKLY) {
             String day = shop.getResetDay().charAt(0) + shop.getResetDay().substring(1).toLowerCase();
-            messageManager.send(sender, MessageManager.INFO_RESET_DAY, Map.of("day", day));
+            messageManager.sendCommand(sender, "info-reset-day", Placeholder.unparsed("day", day));
         }
 
         if (shop.isShared() && shop.getMaxPerPlayer() > 0) {
-            messageManager.send(sender, MessageManager.INFO_PER_PLAYER_CAP,
-                    Map.of("cap", String.valueOf(shop.getMaxPerPlayer())));
+            messageManager.sendCommand(sender, "info-per-player-cap",
+                    Placeholder.unparsed("cap", String.valueOf(shop.getMaxPerPlayer())));
         }
 
-        messageManager.send(sender, MessageManager.INFO_TRADES_COUNT,
-                Map.of("count", String.valueOf(shop.getTrades().size())));
+        messageManager.sendCommand(sender, "info-trades-count",
+                Placeholder.unparsed("count", String.valueOf(shop.getTrades().size())));
 
         for (TradeConfig trade : shop.getTrades().values()) {
             StringBuilder details = new StringBuilder();
@@ -349,8 +354,9 @@ public class StockControlCommand {
                 details.append(", per-player ").append(trade.getMaxPerPlayer());
             }
 
-            messageManager.send(sender, MessageManager.INFO_TRADE_ENTRY,
-                    Map.of("key", trade.getTradeKey(), "details", details.toString()));
+            messageManager.sendCommand(sender, "info-trade-entry",
+                    Placeholder.unparsed("key", trade.getTradeKey()),
+                    Placeholder.unparsed("details", details.toString()));
         }
     }
 
@@ -359,48 +365,57 @@ public class StockControlCommand {
     private void handleResetPlayer(CommandSender sender, String playerName) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "error-player-not-found",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
         plugin.getTradeDataManager().resetPlayerTrades(playerId);
-        messageManager.send(sender, MessageManager.RESET_PLAYER, Map.of("player", playerName));
+        messageManager.sendCommand(sender, "reset-player",
+                Placeholder.unparsed("player", playerName));
     }
 
     private void handleResetPlayerShop(CommandSender sender, String playerName, String shopArg) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "error-player-not-found",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
         plugin.getTradeDataManager().resetPlayerShopTrades(playerId, shop.getShopId());
-        messageManager.send(sender, MessageManager.RESET_PLAYER_SHOP,
-                Map.of("player", playerName, "shop", shop.getName()));
+        messageManager.sendCommand(sender, "reset-player-shop",
+                Placeholder.unparsed("player", playerName),
+                Placeholder.unparsed("shop", shop.getName()));
     }
 
     private void handleResetPlayerShopTrade(CommandSender sender, String playerName, String shopArg, String tradeKey) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "error-player-not-found",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
         plugin.getTradeDataManager().resetPlayerTrade(playerId, shop.getShopId(), tradeKey);
-        messageManager.send(sender, MessageManager.RESET_PLAYER_SHOP_TRADE,
-                Map.of("trade", tradeKey, "player", playerName, "shop", shop.getName()));
+        messageManager.sendCommand(sender, "reset-player-shop-trade",
+                Placeholder.unparsed("trade", tradeKey),
+                Placeholder.unparsed("player", playerName),
+                Placeholder.unparsed("shop", shop.getName()));
     }
 
     // ===== Restock handlers =====
@@ -408,41 +423,48 @@ public class StockControlCommand {
     private void handleRestockShop(CommandSender sender, String shopArg) {
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
         if (!shop.isShared()) {
-            messageManager.send(sender, MessageManager.ERROR_NOT_SHARED, Map.of("shop", shop.getName()));
+            messageManager.sendCommand(sender, "error-not-shared",
+                    Placeholder.unparsed("shop", shop.getName()));
             return;
         }
 
         plugin.getTradeDataManager().resetGlobalShop(shop.getShopId());
-        messageManager.send(sender, MessageManager.RESTOCK_SHOP, Map.of("shop", shop.getName()));
+        messageManager.sendCommand(sender, "restock-shop",
+                Placeholder.unparsed("shop", shop.getName()));
     }
 
     private void handleRestockTrade(CommandSender sender, String shopArg, String tradeKey) {
         ShopConfig shop = resolveShop(shopArg);
         if (shop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
         if (!shop.isShared()) {
-            messageManager.send(sender, MessageManager.ERROR_NOT_SHARED, Map.of("shop", shop.getName()));
+            messageManager.sendCommand(sender, "error-not-shared",
+                    Placeholder.unparsed("shop", shop.getName()));
             return;
         }
 
         TradeConfig trade = shop.getTrade(tradeKey);
         if (trade == null) {
-            messageManager.send(sender, MessageManager.ERROR_TRADE_NOT_FOUND,
-                    Map.of("trade", tradeKey, "shop", shop.getName()));
+            messageManager.sendCommand(sender, "error-trade-not-found",
+                    Placeholder.unparsed("trade", tradeKey),
+                    Placeholder.unparsed("shop", shop.getName()));
             return;
         }
 
         plugin.getTradeDataManager().resetGlobalTrade(shop.getShopId(), tradeKey);
-        messageManager.send(sender, MessageManager.RESTOCK_TRADE,
-                Map.of("trade", tradeKey, "shop", shop.getName()));
+        messageManager.sendCommand(sender, "restock-trade",
+                Placeholder.unparsed("trade", tradeKey),
+                Placeholder.unparsed("shop", shop.getName()));
     }
 
     // ===== Check handlers =====
@@ -450,7 +472,8 @@ public class StockControlCommand {
     private void handleCheckPlayer(CommandSender sender, String playerName) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "error-player-not-found",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
@@ -458,7 +481,8 @@ public class StockControlCommand {
         List<PlayerTradeData> playerTrades = plugin.getTradeDataManager().getPlayerTrades(playerId);
 
         if (playerTrades.isEmpty()) {
-            messageManager.send(sender, MessageManager.CHECK_NO_DATA, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "check-no-data",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
@@ -468,13 +492,15 @@ public class StockControlCommand {
     private void handleCheckPlayerShop(CommandSender sender, String playerName, String shopArg) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "error-player-not-found",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
         ShopConfig filterShop = resolveShop(shopArg);
         if (filterShop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
@@ -485,8 +511,9 @@ public class StockControlCommand {
                 .toList();
 
         if (playerTrades.isEmpty()) {
-            messageManager.send(sender, MessageManager.CHECK_NO_DATA_SHOP,
-                    Map.of("player", playerName, "shop", filterShop.getName()));
+            messageManager.sendCommand(sender, "check-no-data-shop",
+                    Placeholder.unparsed("player", playerName),
+                    Placeholder.unparsed("shop", filterShop.getName()));
             return;
         }
 
@@ -496,13 +523,15 @@ public class StockControlCommand {
     private void handleCheckPlayerShopTrade(CommandSender sender, String playerName, String shopArg, String tradeKey) {
         UUID playerId = resolvePlayerUUID(playerName);
         if (playerId == null) {
-            messageManager.send(sender, MessageManager.ERROR_PLAYER_NOT_FOUND, Map.of("player", playerName));
+            messageManager.sendCommand(sender, "error-player-not-found",
+                    Placeholder.unparsed("player", playerName));
             return;
         }
 
         ShopConfig filterShop = resolveShop(shopArg);
         if (filterShop == null) {
-            messageManager.send(sender, MessageManager.ERROR_SHOP_NOT_FOUND, Map.of("shop", shopArg));
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
             return;
         }
 
@@ -513,8 +542,9 @@ public class StockControlCommand {
                 .toList();
 
         if (playerTrades.isEmpty()) {
-            messageManager.send(sender, MessageManager.CHECK_NO_DATA_TRADE,
-                    Map.of("player", playerName, "trade", tradeKey));
+            messageManager.sendCommand(sender, "check-no-data-trade",
+                    Placeholder.unparsed("player", playerName),
+                    Placeholder.unparsed("trade", tradeKey));
             return;
         }
 
@@ -522,7 +552,8 @@ public class StockControlCommand {
     }
 
     private void displayTradeData(CommandSender sender, String playerName, UUID playerId, List<PlayerTradeData> playerTrades) {
-        messageManager.send(sender, MessageManager.CHECK_HEADER, Map.of("player", playerName));
+        messageManager.sendCommand(sender, "check-header",
+                Placeholder.unparsed("player", playerName));
 
         for (PlayerTradeData data : playerTrades) {
             int remaining = plugin.getTradeDataManager().getRemainingTrades(playerId, data.getShopId(), data.getTradeKey());
@@ -537,25 +568,28 @@ public class StockControlCommand {
             String shopName = shop != null ? shop.getName() : data.getShopId();
             int usedCount = cooldownExpired ? 0 : data.getTradesUsed();
 
-            messageManager.send(sender, MessageManager.CHECK_SHOP, Map.of("shop", shopName));
-            messageManager.send(sender, MessageManager.CHECK_TRADE, Map.of("trade", data.getTradeKey()));
-            messageManager.send(sender, MessageManager.CHECK_USED,
-                    Map.of("used", String.valueOf(usedCount), "max", String.valueOf(maxTrades)));
-            messageManager.send(sender, MessageManager.CHECK_REMAINING,
-                    Map.of("remaining", String.valueOf(remaining)));
+            messageManager.sendCommand(sender, "check-shop",
+                    Placeholder.unparsed("shop", shopName));
+            messageManager.sendCommand(sender, "check-trade",
+                    Placeholder.unparsed("trade", data.getTradeKey()));
+            messageManager.sendCommand(sender, "check-used",
+                    Placeholder.unparsed("used", String.valueOf(usedCount)),
+                    Placeholder.unparsed("max", String.valueOf(maxTrades)));
+            messageManager.sendCommand(sender, "check-remaining",
+                    Placeholder.unparsed("remaining", String.valueOf(remaining)));
 
             if (timeRemaining < 0) {
-                messageManager.send(sender, MessageManager.CHECK_COOLDOWN_NEVER);
+                messageManager.sendCommand(sender, "check-cooldown-never");
             } else if (timeRemaining > 0) {
                 String resetInfo = plugin.getTradeDataManager().formatDuration(timeRemaining);
                 String resetTime = plugin.getTradeDataManager().getResetTimeString(data.getShopId(), data.getTradeKey());
                 if (!resetTime.isEmpty() && !resetTime.equals("Never")) {
                     resetInfo += " (Resets at " + resetTime + ")";
                 }
-                messageManager.send(sender, MessageManager.CHECK_COOLDOWN_ACTIVE,
-                        Map.of("cooldown", resetInfo));
+                messageManager.sendCommand(sender, "check-cooldown-active",
+                        Placeholder.unparsed("cooldown", resetInfo));
             } else {
-                messageManager.send(sender, MessageManager.CHECK_COOLDOWN_READY);
+                messageManager.sendCommand(sender, "check-cooldown-ready");
             }
         }
     }

@@ -9,7 +9,7 @@ import dev.oakheart.stockcontrol.listeners.ShopkeepersListener;
 import dev.oakheart.stockcontrol.managers.CooldownManager;
 import dev.oakheart.stockcontrol.managers.PacketManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
-import dev.oakheart.stockcontrol.message.MessageManager;
+import dev.oakheart.message.MessageManager;
 import dev.oakheart.stockcontrol.placeholders.StockControlExpansion;
 import org.bstats.bukkit.Metrics;
 import org.bukkit.Bukkit;
@@ -83,7 +83,8 @@ public final class ShopkeepersStockControl extends JavaPlugin {
         // Configuration
         configManager = new ConfigManager(this);
         configManager.load();
-        messageManager = new MessageManager(configManager);
+        messageManager = new MessageManager(this, getLogger());
+        messageManager.load();
 
         // Data layer
         initializeDataLayer();
@@ -154,6 +155,7 @@ public final class ShopkeepersStockControl extends JavaPlugin {
     public boolean reloadPluginConfig() {
         boolean success = configManager.reload();
         if (success) {
+            messageManager.reload();
             tradeDataManager.restartBatchWriteTask();
             cooldownManager.restart();
         }

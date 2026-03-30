@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Migrate to OakheartLib shared library (config, messages, commands)
+- Move messages from config.yml to separate messages.yml — existing servers migrate automatically on first startup
+- Config and message files now perfectly preserve comments, formatting, and quoting on every save
+
 ## [1.3.0] - 2026-02-21
 
 ### Added

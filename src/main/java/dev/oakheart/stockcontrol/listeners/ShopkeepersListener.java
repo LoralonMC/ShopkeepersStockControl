@@ -10,7 +10,7 @@ import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.managers.PacketManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
-import dev.oakheart.stockcontrol.message.MessageManager;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -109,10 +109,9 @@ public class ShopkeepersListener implements Listener {
 
             // Send message to player (if configured)
             long timeRemaining = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
-            plugin.getMessageManager().sendFeedback(player, MessageManager.TRADE_LIMIT_REACHED, java.util.Map.of(
-                    "time_remaining", tradeDataManager.formatDuration(timeRemaining),
-                    "reset_time", tradeDataManager.getResetTimeString(shopId, matchedTradeKey)
-            ));
+            plugin.getMessageManager().send(player, "trade-limit-reached",
+                    Placeholder.unparsed("time_remaining", tradeDataManager.formatDuration(timeRemaining)),
+                    Placeholder.unparsed("reset_time", tradeDataManager.getResetTimeString(shopId, matchedTradeKey)));
 
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("Blocked trade for " + player.getName() +
@@ -138,10 +137,9 @@ public class ShopkeepersListener implements Listener {
             long timeUntilReset = shopConfig.isShared()
                     ? tradeDataManager.getGlobalTimeUntilReset(shopId, matchedTradeKey)
                     : tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
-            plugin.getMessageManager().sendFeedback(player, MessageManager.COOLDOWN_ACTIVE, java.util.Map.of(
-                    "time_remaining", tradeDataManager.formatDuration(timeUntilReset),
-                    "reset_time", tradeDataManager.getResetTimeString(shopId, matchedTradeKey)
-            ));
+            plugin.getMessageManager().send(player, "cooldown-active",
+                    Placeholder.unparsed("time_remaining", tradeDataManager.formatDuration(timeUntilReset)),
+                    Placeholder.unparsed("reset_time", tradeDataManager.getResetTimeString(shopId, matchedTradeKey)));
         } else {
             // Show remaining trades
             TradeConfig tradeConfig = shopConfig.getTrade(matchedTradeKey);
@@ -149,10 +147,9 @@ public class ShopkeepersListener implements Listener {
                 int displayMax = (shopConfig.isShared() && tradeConfig.getMaxPerPlayer() > 0)
                         ? tradeConfig.getMaxPerPlayer()
                         : tradeConfig.getMaxTrades();
-                plugin.getMessageManager().sendFeedback(player, MessageManager.TRADES_REMAINING, java.util.Map.of(
-                        "remaining", String.valueOf(remaining),
-                        "max", String.valueOf(displayMax)
-                ));
+                plugin.getMessageManager().send(player, "trades-remaining",
+                        Placeholder.unparsed("remaining", String.valueOf(remaining)),
+                        Placeholder.unparsed("max", String.valueOf(displayMax)));
             }
         }
 
