@@ -11,7 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Migrate to OakheartLib shared library (config, messages, commands)
 - Move messages from config.yml to separate messages.yml — existing servers migrate automatically on first startup
-- Config and message files now perfectly preserve comments, formatting, and quoting on every save
+- All config files (config.yml, messages.yml, trades.yml) now perfectly preserve comments, formatting, and quoting on every save
+
+### Fixed
+
+- Periodic cooldown cleanup now deletes expired entries from the database instead of only evicting them from the cache, so the same row no longer gets rediscovered and re-logged every minute
 
 ## [1.3.0] - 2026-02-21
 

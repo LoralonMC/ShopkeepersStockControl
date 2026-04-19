@@ -5,25 +5,26 @@ import dev.oakheart.stockcontrol.data.CooldownMode;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.StockMode;
 import dev.oakheart.stockcontrol.data.TradeConfig;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.logging.Level;
+import java.util.regex.Pattern;
 
 /**
  * Manages plugin configuration including main config and trades config.
- * Uses OakheartLib's ConfigManager for config.yml and Bukkit's FileConfiguration for trades.yml.
+ * Both files use OakheartLib's ConfigManager — formatting, comments, and quoting
+ * are preserved across saves.
  */
 public class ConfigManager {
     private final ShopkeepersStockControl plugin;
     private final File configFile;
     private final File tradesFile;
     private dev.oakheart.config.ConfigManager config;
-    private FileConfiguration tradesConfig;
+    private dev.oakheart.config.ConfigManager tradesConfig;
     private volatile Map<String, ShopConfig> shops;
 
     // Cached values for hot-path access
@@ -67,6 +68,10 @@ public class ConfigManager {
             plugin.saveResource("trades.yml", false);
         }
 
+        // Rewrite any legacy snake_case keys to kebab-case before the document is parsed,
+        // so the canonical keys are what we read.
+        migrateTradesConfig();
+
         // Load config.yml with OakheartLib
         try {
             config = dev.oakheart.config.ConfigManager.load(configFile.toPath());
@@ -76,9 +81,12 @@ public class ConfigManager {
         mergeDefaults();
         cacheValues();
 
-        // Load trades.yml
-        tradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
-        migrateTradesConfig();
+        // Load trades.yml with OakheartLib
+        try {
+            tradesConfig = dev.oakheart.config.ConfigManager.load(tradesFile.toPath());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load trades.yml", e);
+        }
 
         // Load shop configurations
         loadShops();
@@ -103,52 +111,27 @@ public class ConfigManager {
     }
 
     /**
-     * Migrates trades.yml from snake_case to kebab-case keys.
-     * Checks each shop and trade section for old-style keys.
+     * Rewrites legacy snake_case field names in trades.yml to kebab-case.
+     * Uses in-place text substitution so comments, ordering, and indentation survive verbatim.
+     * The trailing ": " in the pattern keeps shop or trade IDs that happen to match an old
+     * field name (section headers end with just ':') from being rewritten.
      */
     private void migrateTradesConfig() {
-        ConfigurationSection shopsSection = tradesConfig.getConfigurationSection("shops");
-        if (shopsSection == null) return;
+        try {
+            String text = Files.readString(tradesFile.toPath(), StandardCharsets.UTF_8);
+            String original = text;
 
-        boolean changed = false;
-        for (String shopId : shopsSection.getKeys(false)) {
-            ConfigurationSection shopSection = shopsSection.getConfigurationSection(shopId);
-            if (shopSection == null) continue;
-
-            // Migrate shop-level keys
             for (Map.Entry<String, String> entry : TRADES_KEY_MIGRATIONS.entrySet()) {
-                if (shopSection.contains(entry.getKey()) && !shopSection.contains(entry.getValue())) {
-                    shopSection.set(entry.getValue(), shopSection.get(entry.getKey()));
-                    shopSection.set(entry.getKey(), null);
-                    changed = true;
-                }
+                String pattern = "(?m)^(\\s+)" + Pattern.quote(entry.getKey()) + ": ";
+                text = text.replaceAll(pattern, "$1" + entry.getValue() + ": ");
             }
 
-            // Migrate per-trade keys
-            ConfigurationSection tradesSection = shopSection.getConfigurationSection("trades");
-            if (tradesSection != null) {
-                for (String tradeKey : tradesSection.getKeys(false)) {
-                    ConfigurationSection tradeSection = tradesSection.getConfigurationSection(tradeKey);
-                    if (tradeSection == null) continue;
-
-                    for (Map.Entry<String, String> entry : TRADES_KEY_MIGRATIONS.entrySet()) {
-                        if (tradeSection.contains(entry.getKey()) && !tradeSection.contains(entry.getValue())) {
-                            tradeSection.set(entry.getValue(), tradeSection.get(entry.getKey()));
-                            tradeSection.set(entry.getKey(), null);
-                            changed = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (changed) {
-            try {
-                tradesConfig.save(tradesFile);
+            if (!text.equals(original)) {
+                Files.writeString(tradesFile.toPath(), text, StandardCharsets.UTF_8);
                 plugin.getLogger().info("trades.yml migrated to kebab-case keys successfully");
-            } catch (IOException e) {
-                plugin.getLogger().log(Level.WARNING, "Failed to save migrated trades.yml", e);
             }
+        } catch (IOException e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to migrate trades.yml", e);
         }
     }
 
@@ -172,7 +155,14 @@ public class ConfigManager {
     public boolean reload() {
         try {
             config.reload();
-            FileConfiguration newTradesConfig = YamlConfiguration.loadConfiguration(tradesFile);
+
+            dev.oakheart.config.ConfigManager newTradesConfig;
+            try {
+                newTradesConfig = dev.oakheart.config.ConfigManager.load(tradesFile.toPath());
+            } catch (IOException e) {
+                plugin.getLogger().log(Level.SEVERE, "Failed to reload trades.yml", e);
+                return false;
+            }
 
             // Load new shop configurations
             Map<String, ShopConfig> newShops = loadShopsFromConfig(newTradesConfig);
@@ -236,56 +226,55 @@ public class ConfigManager {
     /**
      * Loads shop configurations from the trades config.
      *
-     * @param tradesNode The trades FileConfiguration
+     * @param tradesNode The trades ConfigManager
      * @return Map of shop ID to ShopConfig
      */
-    private Map<String, ShopConfig> loadShopsFromConfig(FileConfiguration tradesNode) {
+    private Map<String, ShopConfig> loadShopsFromConfig(dev.oakheart.config.ConfigManager tradesNode) {
         Map<String, ShopConfig> loadedShops = new HashMap<>();
 
-        ConfigurationSection shopsSection = tradesNode.getConfigurationSection("shops");
-        if (shopsSection == null) {
+        if (!tradesNode.isSection("shops")) {
             plugin.getLogger().warning("No shops configured in trades.yml");
             return loadedShops;
         }
 
-        for (String shopId : shopsSection.getKeys(false)) {
-            ConfigurationSection shopSection = shopsSection.getConfigurationSection(shopId);
-            if (shopSection == null) continue;
+        for (String shopId : tradesNode.getKeys("shops", false)) {
+            String shopPath = "shops." + shopId;
+            if (!tradesNode.isSection(shopPath)) continue;
 
-            String name = shopSection.getString("name", shopId);
-            boolean enabled = shopSection.getBoolean("enabled", true);
+            String name = tradesNode.getString(shopPath + ".name", shopId);
+            boolean enabled = tradesNode.getBoolean(shopPath + ".enabled", true);
 
             // Per-shop cooldown settings
-            CooldownMode cooldownMode = CooldownMode.fromString(shopSection.getString("cooldown-mode", "rolling"));
-            String resetTime = shopSection.getString("reset-time", "00:00");
-            String rawResetDay = shopSection.getString("reset-day", "monday");
+            CooldownMode cooldownMode = CooldownMode.fromString(tradesNode.getString(shopPath + ".cooldown-mode", "rolling"));
+            String resetTime = tradesNode.getString(shopPath + ".reset-time", "00:00");
+            String rawResetDay = tradesNode.getString(shopPath + ".reset-day", "monday");
             String resetDay = rawResetDay != null ? rawResetDay.toUpperCase() : "MONDAY";
 
             // Stock mode settings
-            StockMode stockMode = StockMode.fromString(shopSection.getString("stock-mode", "per_player"));
-            int shopMaxPerPlayer = shopSection.getInt("max-per-player", 0);
+            StockMode stockMode = StockMode.fromString(tradesNode.getString(shopPath + ".stock-mode", "per_player"));
+            int shopMaxPerPlayer = tradesNode.getInt(shopPath + ".max-per-player", 0);
 
             Map<String, TradeConfig> trades = new HashMap<>();
-            ConfigurationSection tradesSection = shopSection.getConfigurationSection("trades");
-            if (tradesSection != null) {
-                for (String tradeKey : tradesSection.getKeys(false)) {
-                    ConfigurationSection tradeSection = tradesSection.getConfigurationSection(tradeKey);
-                    if (tradeSection == null) continue;
+            String tradesPath = shopPath + ".trades";
+            if (tradesNode.isSection(tradesPath)) {
+                for (String tradeKey : tradesNode.getKeys(tradesPath, false)) {
+                    String tradePath = tradesPath + "." + tradeKey;
+                    if (!tradesNode.isSection(tradePath)) continue;
 
-                    int slot = tradeSection.getInt("slot", -1);
-                    int maxTrades = tradeSection.getInt("max-trades", 1);
-                    int cooldown = tradeSection.getInt("cooldown", 86400);
+                    int slot = tradesNode.getInt(tradePath + ".slot", -1);
+                    int maxTrades = tradesNode.getInt(tradePath + ".max-trades", 1);
+                    int cooldown = tradesNode.getInt(tradePath + ".cooldown", 86400);
 
                     // Per-trade cooldown settings with shop-level fallback
-                    CooldownMode tradeCooldownMode = tradeSection.contains("cooldown-mode")
-                            ? CooldownMode.fromString(tradeSection.getString("cooldown-mode"))
+                    CooldownMode tradeCooldownMode = tradesNode.contains(tradePath + ".cooldown-mode")
+                            ? CooldownMode.fromString(tradesNode.getString(tradePath + ".cooldown-mode"))
                             : cooldownMode;
-                    String tradeResetTime = tradeSection.getString("reset-time", resetTime);
-                    String rawTradeResetDay = tradeSection.getString("reset-day");
+                    String tradeResetTime = tradesNode.getString(tradePath + ".reset-time", resetTime);
+                    String rawTradeResetDay = tradesNode.getString(tradePath + ".reset-day");
                     String tradeResetDay = rawTradeResetDay != null ? rawTradeResetDay.toUpperCase() : resetDay;
 
-                    int tradeMaxPerPlayer = tradeSection.contains("max-per-player")
-                            ? tradeSection.getInt("max-per-player", 0)
+                    int tradeMaxPerPlayer = tradesNode.contains(tradePath + ".max-per-player")
+                            ? tradesNode.getInt(tradePath + ".max-per-player", 0)
                             : shopMaxPerPlayer;
 
                     if (isDebugMode()) {

@@ -885,6 +885,8 @@ public class TradeDataManager {
             dirtyKeys.remove(key);
             if (data != null) {
                 untrackCacheKey(data.getPlayerId(), key);
+                // Delete from DB so the row doesn't get reloaded and re-detected as expired next tick.
+                dataStore.deleteTradeData(data.getPlayerId(), data.getShopId(), data.getTradeKey());
             }
         }
         cleaned += toRemove.size();
@@ -904,8 +906,11 @@ public class TradeDataManager {
         }
 
         for (String key : globalToRemove) {
-            globalTradeCache.remove(key);
+            GlobalTradeData data = globalTradeCache.remove(key);
             globalDirtyKeys.remove(key);
+            if (data != null) {
+                dataStore.deleteGlobalTradeData(data.getShopId(), data.getTradeKey());
+            }
         }
         cleaned += globalToRemove.size();
 
