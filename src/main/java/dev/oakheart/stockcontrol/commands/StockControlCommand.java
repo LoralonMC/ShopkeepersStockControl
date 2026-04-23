@@ -650,9 +650,9 @@ public class StockControlCommand {
                         java.util.UUID id = fakeIds.get(i);
                         long t0 = System.nanoTime();
                         try {
-                            plugin.getTradeDataManager().resetIfExpired(id, shopId, tradeKey);
-                            if (plugin.getTradeDataManager().canTrade(id, shopId, tradeKey)) {
-                                plugin.getTradeDataManager().recordTrade(id, shopId, tradeKey);
+                            // Use the atomic compound entry point so "Success" only counts
+                            // trades that actually passed check+increment under the lock.
+                            if (plugin.getTradeDataManager().attemptTrade(id, shopId, tradeKey)) {
                                 successes.incrementAndGet();
                             } else {
                                 blocks.incrementAndGet();

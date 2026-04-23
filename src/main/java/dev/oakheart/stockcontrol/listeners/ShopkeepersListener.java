@@ -100,14 +100,13 @@ public class ShopkeepersListener implements Listener {
             return;
         }
 
-        // Reset expired cooldowns before checking
-        tradeDataManager.resetIfExpired(player.getUniqueId(), shopId, matchedTradeKey);
-
-        // Check if player can trade
-        if (!tradeDataManager.canTrade(player.getUniqueId(), shopId, matchedTradeKey)) {
+        // Atomic "reset-if-expired + canTrade + recordTrade" — prevents a compound race
+        // where concurrent callers all pass the cap check and all increment past it.
+        if (!tradeDataManager.attemptTrade(player.getUniqueId(), shopId, matchedTradeKey)) {
             event.setCancelled(true);
 
-            // Send message to player (if configured)
+            // Send message to player (if configured). Reads are lock-free and fine to do
+            // after the atomic attempt has already decided.
             long timeRemaining = tradeDataManager.getTimeUntilReset(player.getUniqueId(), shopId, matchedTradeKey);
             plugin.getMessageManager().send(player, "trade-limit-reached",
                     Placeholder.unparsed("time_remaining", tradeDataManager.formatDuration(timeRemaining)),
@@ -119,9 +118,6 @@ public class ShopkeepersListener implements Listener {
             }
             return;
         }
-
-        // Record the trade
-        tradeDataManager.recordTrade(player.getUniqueId(), shopId, matchedTradeKey);
 
         // Schedule debounced stock push for other viewers of shared shops
         if (shopConfig.isShared()) {

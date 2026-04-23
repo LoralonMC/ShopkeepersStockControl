@@ -398,6 +398,30 @@ public class TradeDataManager {
         }
     }
 
+    // ===== Atomic trade attempt =====
+
+    /**
+     * Atomic "reset-expired + check + record" under the writeResetLock so the decision to
+     * trade and the stock increment are one unit of work. This prevents a compound race
+     * where many concurrent threads all read {@code globalUsed = maxTrades - 1}, all decide
+     * canTrade is true, and all increment — pushing the counter past the cap.
+     *
+     * Main-thread Bukkit events are already serial so production never hits this race, but
+     * using the atomic entry point is cheaper than reasoning about every possible caller.
+     *
+     * @return true if the trade was allowed and recorded; false if blocked
+     */
+    public boolean attemptTrade(UUID playerId, String shopId, String tradeKey) {
+        synchronized (writeResetLock) {
+            resetIfExpired(playerId, shopId, tradeKey);
+            if (!canTrade(playerId, shopId, tradeKey)) {
+                return false;
+            }
+            recordTrade(playerId, shopId, tradeKey);
+            return true;
+        }
+    }
+
     // ===== Reset Time & Duration =====
 
     /**
