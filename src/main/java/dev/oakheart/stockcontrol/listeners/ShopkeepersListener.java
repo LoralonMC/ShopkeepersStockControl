@@ -212,9 +212,8 @@ public class ShopkeepersListener implements Listener {
                 return null;
             }
 
-            // Map the slot index to the configured trade key
-            var slotMap = shopConfig.getTradesBySlot();
-            TradeConfig tradeConfig = slotMap.get(clickedIndex);
+            // Resolve by Shopkeepers source slot — covers both static trades and pool items.
+            TradeConfig tradeConfig = shopConfig.findBySourceSlot(clickedIndex);
 
             if (tradeConfig == null) {
                 // This slot is not configured for tracking

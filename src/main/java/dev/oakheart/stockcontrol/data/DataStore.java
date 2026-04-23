@@ -156,6 +156,29 @@ public interface DataStore {
     void deleteGlobalShopData(String shopId);
 
     /**
+     * Loads every persisted pool rotation state.
+     * Called once at startup so the manager can reconcile against current wall-clock.
+     *
+     * @return List of rotation states (empty if none persisted yet)
+     */
+    List<RotationState> loadAllRotationStates();
+
+    /**
+     * Upserts one pool's rotation state.
+     *
+     * @param state The state to persist
+     */
+    void saveRotationState(RotationState state);
+
+    /**
+     * Removes persisted state for one pool (e.g. when the pool is removed from config).
+     *
+     * @param shopId   The owning shop ID
+     * @param poolName The pool name
+     */
+    void deleteRotationState(String shopId, String poolName);
+
+    /**
      * Checks if the data store is properly initialized and operational.
      *
      * @return true if operational, false otherwise

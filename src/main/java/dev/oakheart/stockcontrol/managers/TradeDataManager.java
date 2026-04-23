@@ -151,7 +151,7 @@ public class TradeDataManager {
      * Resets expired cooldowns for shared-mode shops.
      */
     private void resetIfExpiredShared(UUID playerId, String shopId, String tradeKey, ShopConfig shopConfig) {
-        TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
+        TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig == null) return;
 
         long now = System.currentTimeMillis() / 1000;
@@ -211,7 +211,7 @@ public class TradeDataManager {
      * Checks if a player can trade in a shared-mode shop (pure read-only).
      */
     private boolean canTradeShared(UUID playerId, String shopId, String tradeKey, ShopConfig shopConfig) {
-        TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
+        TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig == null) return true; // Untracked trade
 
         // Check global stock
@@ -267,7 +267,7 @@ public class TradeDataManager {
      * Returns min(globalRemaining, playerCapRemaining) when per-player cap is set.
      */
     private int getRemainingTradesShared(UUID playerId, String shopId, String tradeKey, ShopConfig shopConfig) {
-        TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
+        TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig == null) return 0;
 
         // Global remaining
@@ -380,7 +380,7 @@ public class TradeDataManager {
         globalDirtyKeys.add(globalData.getCacheKey());
 
         // Increment per-player counter if per-player cap is configured
-        TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
+        TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig != null && tradeConfig.getMaxPerPlayer() > 0) {
             PlayerTradeData playerData = getOrCreateTradeData(playerId, shopId, tradeKey);
             playerData.setTradesUsed(playerData.getTradesUsed() + 1);
@@ -1157,27 +1157,18 @@ public class TradeDataManager {
     private TradeConfig getTradeConfig(String shopId, String tradeKey) {
         ShopConfig shop = plugin.getConfigManager().getShop(shopId);
         if (shop == null) return null;
-        return shop.getTrade(tradeKey);
+        // Unified lookup covers both static trades and pool items.
+        return shop.findTradeLimits(tradeKey);
     }
 
     private int getTradeLimit(String shopId, String tradeKey) {
-        ShopConfig shop = plugin.getConfigManager().getShop(shopId);
-        if (shop == null) return 1;
-
-        TradeConfig trade = shop.getTrade(tradeKey);
-        if (trade == null) return 1;
-
-        return trade.getMaxTrades();
+        TradeConfig trade = getTradeConfig(shopId, tradeKey);
+        return trade == null ? 1 : trade.getMaxTrades();
     }
 
     private int getCooldownSeconds(String shopId, String tradeKey) {
-        ShopConfig shop = plugin.getConfigManager().getShop(shopId);
-        if (shop == null) return 86400;
-
-        TradeConfig trade = shop.getTrade(tradeKey);
-        if (trade == null) return 86400;
-
-        return trade.getCooldownSeconds();
+        TradeConfig trade = getTradeConfig(shopId, tradeKey);
+        return trade == null ? 86400 : trade.getCooldownSeconds();
     }
 
     // ===== Cache Key Helpers =====

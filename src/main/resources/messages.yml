@@ -91,3 +91,9 @@ commands:
   info-per-player-cap: "<#f2ebd7>Default Per-Player Cap: <#FCD472><cap>"
   info-trades-count: "<#f2ebd7>Trades: <#FCD472><count>"
   info-trade-entry: "<#6C757D>  - <#FCD472><key> <#6C757D>(<details>)"
+
+  rotation-no-pools: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#D89B6A>Shop <#FCD472><name> <#D89B6A>has no rotation pools configured."
+  rotation-pool-not-found: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Pool <#FCD472><pool> <#C27B6B>not found in shop <#FCD472><name><#C27B6B>."
+  rotation-peek-header: "<#6B7A5E>=== Rotation for <#FCD472><name> <#6B7A5E>==="
+  rotation-peek-pool: "<#f2ebd7>Pool <#FCD472><pool><#f2ebd7>: <#FCD472><active> <#6C757D>(next in <#FCD472><next><#6C757D>)"
+  rotation-force-success: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Force-advanced <#FCD472><count> <#8FAA87>pool(s) in shop <#FCD472><name>"

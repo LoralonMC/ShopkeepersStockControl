@@ -43,6 +43,10 @@ purge-inactive-days: 0
 #   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g. "100")
 #   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g. "73")
 #
+# Rotation-pool placeholders (use pool name instead of trade key):
+#   %ssc_poolactive_<shop>:<pool>%        - Comma-separated active item keys (e.g. "summer_melon,berry_pie")
+#   %ssc_poolnext_<shop>:<pool>%          - Time until next rotation (e.g. "5h 23m")
+#
 # Examples:
 #   %ssc_remaining_miner:diamond%             - Using shop display name
 #   %ssc_cooldown_f65776c2-...-bdf4d:diamond% - Using shop ID

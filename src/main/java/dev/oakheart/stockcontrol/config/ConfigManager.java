@@ -2,9 +2,14 @@ package dev.oakheart.stockcontrol.config;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.data.CooldownMode;
+import dev.oakheart.stockcontrol.data.PoolConfig;
+import dev.oakheart.stockcontrol.data.PoolItemConfig;
+import dev.oakheart.stockcontrol.data.RotationMode;
+import dev.oakheart.stockcontrol.data.RotationSchedule;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.StockMode;
 import dev.oakheart.stockcontrol.data.TradeConfig;
+import dev.oakheart.stockcontrol.util.DurationParser;
 
 import java.io.File;
 import java.io.IOException;
@@ -262,6 +267,9 @@ public class ConfigManager {
                     if (!tradesNode.isSection(tradePath)) continue;
 
                     int slot = tradesNode.getInt(tradePath + ".slot", -1);
+                    int sourceSlot = tradesNode.contains(tradePath + ".source")
+                            ? tradesNode.getInt(tradePath + ".source", slot)
+                            : slot;
                     int maxTrades = tradesNode.getInt(tradePath + ".max-trades", 1);
                     int cooldown = tradesNode.getInt(tradePath + ".cooldown", 86400);
 
@@ -279,23 +287,110 @@ public class ConfigManager {
 
                     if (isDebugMode()) {
                         plugin.getLogger().info("Loading trade '" + tradeKey + "' for shop " + shopId +
-                                ": slot=" + slot + ", max-trades=" + maxTrades + ", cooldown=" + cooldown +
-                                ", mode=" + tradeCooldownMode);
+                                ": slot=" + slot + ", source=" + sourceSlot + ", max-trades=" + maxTrades
+                                + ", cooldown=" + cooldown + ", mode=" + tradeCooldownMode);
                     }
 
-                    TradeConfig tradeConfig = new TradeConfig(tradeKey, slot, maxTrades, cooldown,
+                    TradeConfig tradeConfig = new TradeConfig(tradeKey, slot, sourceSlot, maxTrades, cooldown,
                             tradeCooldownMode, tradeResetTime, tradeResetDay, tradeMaxPerPlayer);
                     trades.put(tradeKey, tradeConfig);
                 }
             }
 
+            // Rotation pools (optional)
+            Map<String, PoolConfig> pools = loadPoolsFromConfig(tradesNode, shopPath, shopId,
+                    cooldownMode, resetTime, resetDay, shopMaxPerPlayer);
+
             ShopConfig shopConfig = new ShopConfig(shopId, name, enabled,
-                    cooldownMode, resetTime, resetDay, stockMode, shopMaxPerPlayer, trades);
+                    cooldownMode, resetTime, resetDay, stockMode, shopMaxPerPlayer, trades, pools);
             loadedShops.put(shopId, shopConfig);
         }
 
         plugin.getLogger().info("Loaded " + loadedShops.size() + " shop configurations");
         return loadedShops;
+    }
+
+    /**
+     * Loads rotation pools for a single shop.
+     * Returns an empty map if the shop declares no pools.
+     */
+    private Map<String, PoolConfig> loadPoolsFromConfig(dev.oakheart.config.ConfigManager tradesNode,
+                                                       String shopPath, String shopId,
+                                                       CooldownMode shopCooldownMode,
+                                                       String shopResetTime, String shopResetDay,
+                                                       int shopMaxPerPlayer) {
+        String poolsPath = shopPath + ".pools";
+        if (!tradesNode.isSection(poolsPath)) {
+            return new LinkedHashMap<>();
+        }
+
+        Map<String, PoolConfig> pools = new LinkedHashMap<>();
+
+        for (String poolName : tradesNode.getKeys(poolsPath, false)) {
+            String poolPath = poolsPath + "." + poolName;
+            if (!tradesNode.isSection(poolPath)) continue;
+
+            List<Integer> uiSlots = tradesNode.getIntList(poolPath + ".ui-slots");
+            int visible = tradesNode.getInt(poolPath + ".visible", uiSlots.size());
+            RotationMode mode = RotationMode.fromString(tradesNode.getString(poolPath + ".mode", "random"));
+            RotationSchedule schedule = RotationSchedule.fromString(
+                    tradesNode.getString(poolPath + ".schedule", "daily"));
+            String poolResetTime = tradesNode.getString(poolPath + ".reset-time", shopResetTime);
+            String rawPoolResetDay = tradesNode.getString(poolPath + ".reset-day");
+            String poolResetDay = rawPoolResetDay != null ? rawPoolResetDay.toUpperCase() : shopResetDay;
+
+            long intervalSeconds = 0L;
+            if (schedule == RotationSchedule.INTERVAL) {
+                String every = tradesNode.getString(poolPath + ".every");
+                if (every == null) {
+                    intervalSeconds = -1L;  // Sentinel: validation will surface the missing 'every'.
+                } else {
+                    try {
+                        intervalSeconds = DurationParser.parseSeconds(every);
+                    } catch (IllegalArgumentException e) {
+                        intervalSeconds = -1L;
+                    }
+                }
+            }
+
+            Map<String, PoolItemConfig> items = new LinkedHashMap<>();
+            String itemsPath = poolPath + ".items";
+            if (tradesNode.isSection(itemsPath)) {
+                for (String itemKey : tradesNode.getKeys(itemsPath, false)) {
+                    String itemPath = itemsPath + "." + itemKey;
+                    if (!tradesNode.isSection(itemPath)) continue;
+
+                    int sourceSlot = tradesNode.getInt(itemPath + ".source", -1);
+                    int maxTrades = tradesNode.getInt(itemPath + ".max-trades", 1);
+                    int cooldown = tradesNode.getInt(itemPath + ".cooldown", 86400);
+
+                    CooldownMode itemCooldownMode = tradesNode.contains(itemPath + ".cooldown-mode")
+                            ? CooldownMode.fromString(tradesNode.getString(itemPath + ".cooldown-mode"))
+                            : shopCooldownMode;
+                    String itemResetTime = tradesNode.getString(itemPath + ".reset-time", shopResetTime);
+                    String rawItemResetDay = tradesNode.getString(itemPath + ".reset-day");
+                    String itemResetDay = rawItemResetDay != null ? rawItemResetDay.toUpperCase() : shopResetDay;
+
+                    int itemMaxPerPlayer = tradesNode.contains(itemPath + ".max-per-player")
+                            ? tradesNode.getInt(itemPath + ".max-per-player", 0)
+                            : shopMaxPerPlayer;
+
+                    if (isDebugMode()) {
+                        plugin.getLogger().info("Loading pool item '" + itemKey + "' for pool " + poolName
+                                + " in shop " + shopId + ": source=" + sourceSlot
+                                + ", max-trades=" + maxTrades + ", mode=" + itemCooldownMode);
+                    }
+
+                    items.put(itemKey, new PoolItemConfig(itemKey, sourceSlot, maxTrades, cooldown,
+                            itemCooldownMode, itemResetTime, itemResetDay, itemMaxPerPlayer));
+                }
+            }
+
+            pools.put(poolName, new PoolConfig(poolName, uiSlots, visible, mode, schedule,
+                    poolResetTime, poolResetDay, intervalSeconds, items));
+        }
+
+        return pools;
     }
 
     /**
@@ -308,60 +403,158 @@ public class ConfigManager {
         Set<String> errors = new LinkedHashSet<>();
 
         for (ShopConfig shop : shopsToValidate.values()) {
-            Set<Integer> usedSlots = new HashSet<>();
-            Set<String> tradeKeys = new HashSet<>();
+            Set<Integer> usedSourceSlots = new HashSet<>();
+            Set<Integer> usedUiSlots = new HashSet<>();
+            Set<String> allItemKeys = new HashSet<>();
 
             for (TradeConfig trade : shop.getTrades().values()) {
-                // Check for duplicate trade keys
-                if (!tradeKeys.add(trade.getTradeKey())) {
+                if (!allItemKeys.add(trade.getTradeKey())) {
                     errors.add("Shop '" + shop.getShopId() + "': Duplicate trade key '" + trade.getTradeKey() + "'");
                 }
 
-                // Check for duplicate slots
-                if (!usedSlots.add(trade.getSlot())) {
-                    errors.add("Shop '" + shop.getShopId() + "': Duplicate slot " + trade.getSlot());
+                // Report duplicates once — for most configs slot==source so two errors would be noise.
+                // Source uniqueness is the load-bearing check (it's what maps to the Shopkeepers packet).
+                if (!usedSourceSlots.add(trade.getSourceSlot())) {
+                    errors.add("Shop '" + shop.getShopId() + "': Duplicate slot "
+                            + trade.getSourceSlot() + " (trade '" + trade.getTradeKey() + "')");
+                }
+                // Populate the UI-slot set so pools can detect collisions against static trades,
+                // but only report duplicates if the admin explicitly split slot/source.
+                if (!usedUiSlots.add(trade.getSlot()) && trade.getSlot() != trade.getSourceSlot()) {
+                    errors.add("Shop '" + shop.getShopId() + "': Duplicate UI slot " + trade.getSlot()
+                            + " (trade '" + trade.getTradeKey() + "')");
                 }
 
-                // Validate positive values
-                if (trade.getMaxTrades() <= 0) {
-                    errors.add("Trade '" + trade.getTradeKey() + "': max-trades must be > 0");
-                }
-                if (trade.getCooldownMode() == CooldownMode.ROLLING && trade.getCooldownSeconds() <= 0) {
-                    errors.add("Trade '" + trade.getTradeKey() + "': cooldown must be > 0 for rolling mode");
-                }
-                if (trade.getSlot() < 0) {
-                    errors.add("Trade '" + trade.getTradeKey() + "': slot must be >= 0");
-                }
-                if (trade.getMaxPerPlayer() < 0) {
-                    errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                            + "': max-per-player must be >= 0");
-                }
-                if (trade.getMaxPerPlayer() > 0 && trade.getMaxPerPlayer() > trade.getMaxTrades()
-                        && shop.isShared()) {
-                    errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                            + "': max-per-player (" + trade.getMaxPerPlayer()
-                            + ") exceeds max-trades (" + trade.getMaxTrades() + ")");
-                }
+                validateTradeFields(errors, shop, trade.getTradeKey(), trade.getSlot(),
+                        trade.getSourceSlot(), trade.getMaxTrades(), trade.getCooldownSeconds(),
+                        trade.getCooldownMode(), trade.getResetTime(), trade.getResetDay(),
+                        trade.getMaxPerPlayer());
+            }
 
-                // Validate per-trade cooldown settings
-                CooldownMode mode = trade.getCooldownMode();
-                if (mode == CooldownMode.DAILY || mode == CooldownMode.WEEKLY) {
-                    String tradeResetTime = trade.getResetTime();
-                    if (!tradeResetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
-                        errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                                + "': reset-time must be in HH:mm format (00:00 to 23:59). Current: '" + tradeResetTime + "'");
-                    }
-                }
-                if (mode == CooldownMode.WEEKLY) {
-                    if (!VALID_DAYS.contains(trade.getResetDay())) {
-                        errors.add("Trade '" + trade.getTradeKey() + "' in shop '" + shop.getShopId()
-                                + "': reset-day must be a valid day of the week. Current: '" + trade.getResetDay() + "'");
-                    }
-                }
+            for (PoolConfig pool : shop.getPools().values()) {
+                validatePool(errors, shop, pool, usedUiSlots, usedSourceSlots, allItemKeys);
             }
         }
 
         return errors;
+    }
+
+    /**
+     * Shared field-level validation for static trades and pool items.
+     * UI-slot and source-slot uniqueness are handled by the caller (they differ between
+     * static trades and pool items), but all the per-item numeric/format checks live here.
+     */
+    private void validateTradeFields(Set<String> errors, ShopConfig shop, String itemKey,
+                                     int uiSlot, int sourceSlot, int maxTrades, int cooldownSeconds,
+                                     CooldownMode mode, String resetTime, String resetDay,
+                                     int maxPerPlayer) {
+        if (maxTrades <= 0) {
+            errors.add("Trade '" + itemKey + "': max-trades must be > 0");
+        }
+        if (mode == CooldownMode.ROLLING && cooldownSeconds <= 0) {
+            errors.add("Trade '" + itemKey + "': cooldown must be > 0 for rolling mode");
+        }
+        // uiSlot < 0 is only meaningful for static trades (pool items pass -1 intentionally).
+        if (uiSlot == -1 && sourceSlot >= 0) {
+            // Pool item — skip the uiSlot check.
+        } else if (uiSlot < 0) {
+            errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId() + "': slot must be >= 0");
+        }
+        if (sourceSlot < 0) {
+            errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId() + "': source must be >= 0");
+        }
+        if (maxPerPlayer < 0) {
+            errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId()
+                    + "': max-per-player must be >= 0");
+        }
+        if (maxPerPlayer > 0 && maxPerPlayer > maxTrades && shop.isShared()) {
+            errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId()
+                    + "': max-per-player (" + maxPerPlayer
+                    + ") exceeds max-trades (" + maxTrades + ")");
+        }
+
+        if (mode == CooldownMode.DAILY || mode == CooldownMode.WEEKLY) {
+            if (!resetTime.matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
+                errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId()
+                        + "': reset-time must be in HH:mm format (00:00 to 23:59). Current: '" + resetTime + "'");
+            }
+        }
+        if (mode == CooldownMode.WEEKLY) {
+            if (!VALID_DAYS.contains(resetDay)) {
+                errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId()
+                        + "': reset-day must be a valid day of the week. Current: '" + resetDay + "'");
+            }
+        }
+    }
+
+    /**
+     * Validates one rotation pool and its items, mutating the slot/key uniqueness sets
+     * so cross-shop duplicates get flagged across static trades and other pools.
+     */
+    private void validatePool(Set<String> errors, ShopConfig shop, PoolConfig pool,
+                              Set<Integer> usedUiSlots, Set<Integer> usedSourceSlots,
+                              Set<String> allItemKeys) {
+        String shopId = shop.getShopId();
+        String poolName = pool.getName();
+        String where = "Pool '" + poolName + "' in shop '" + shopId + "'";
+
+        if (pool.getUiSlots().isEmpty()) {
+            errors.add(where + ": ui-slots must list at least one UI position");
+        }
+        if (pool.getVisible() != pool.getUiSlots().size()) {
+            errors.add(where + ": visible (" + pool.getVisible()
+                    + ") must equal ui-slots size (" + pool.getUiSlots().size() + ")");
+        }
+        if (pool.getItems().size() < pool.getVisible()) {
+            errors.add(where + ": items count (" + pool.getItems().size()
+                    + ") must be >= visible (" + pool.getVisible() + ")");
+        }
+
+        for (int ui : pool.getUiSlots()) {
+            if (ui < 0) {
+                errors.add(where + ": ui-slots entry " + ui + " must be >= 0");
+            }
+            if (!usedUiSlots.add(ui)) {
+                errors.add(where + ": UI slot " + ui + " collides with another pool or static trade");
+            }
+        }
+
+        switch (pool.getSchedule()) {
+            case DAILY, WEEKLY -> {
+                if (!pool.getResetTime().matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
+                    errors.add(where + ": reset-time must be HH:mm. Current: '" + pool.getResetTime() + "'");
+                }
+                if (pool.getSchedule() == RotationSchedule.WEEKLY
+                        && !VALID_DAYS.contains(pool.getResetDay())) {
+                    errors.add(where + ": reset-day must be a valid day of the week. Current: '"
+                            + pool.getResetDay() + "'");
+                }
+            }
+            case INTERVAL -> {
+                if (pool.getIntervalSeconds() <= 0) {
+                    errors.add(where + ": 'every' must be a valid duration (e.g. 6h, 30m, 45s, 2d)");
+                }
+            }
+        }
+
+        for (PoolItemConfig item : pool.getItems().values()) {
+            String itemKey = item.getItemKey();
+
+            if (!allItemKeys.add(itemKey)) {
+                errors.add(where + ": item key '" + itemKey
+                        + "' duplicates a static trade or another pool item in this shop");
+            }
+            if (!usedSourceSlots.add(item.getSourceSlot())) {
+                errors.add(where + ": Shopkeepers source slot " + item.getSourceSlot()
+                        + " (item '" + itemKey + "') collides with another trade or pool item");
+            }
+
+            // Pool items share the same numeric/format checks as static trades.
+            // UI slot is pool-owned; pass -1 as a placeholder that the helper ignores.
+            validateTradeFields(errors, shop, itemKey, -1, item.getSourceSlot(),
+                    item.getMaxTrades(), item.getCooldownSeconds(), item.getCooldownMode(),
+                    item.getResetTime(), item.getResetDay(), item.getMaxPerPlayer());
+        }
     }
 
     /**

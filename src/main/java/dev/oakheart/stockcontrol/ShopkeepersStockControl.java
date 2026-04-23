@@ -8,6 +8,7 @@ import dev.oakheart.stockcontrol.listeners.PlayerQuitListener;
 import dev.oakheart.stockcontrol.listeners.ShopkeepersListener;
 import dev.oakheart.stockcontrol.managers.CooldownManager;
 import dev.oakheart.stockcontrol.managers.PacketManager;
+import dev.oakheart.stockcontrol.managers.PoolRotationManager;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
 import dev.oakheart.message.MessageManager;
 import dev.oakheart.stockcontrol.placeholders.StockControlExpansion;
@@ -29,6 +30,7 @@ public final class ShopkeepersStockControl extends JavaPlugin {
     private TradeDataManager tradeDataManager;
     private PacketManager packetManager;
     private CooldownManager cooldownManager;
+    private PoolRotationManager poolRotationManager;
 
     @Override
     public void onEnable() {
@@ -49,6 +51,9 @@ public final class ShopkeepersStockControl extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (poolRotationManager != null) {
+            poolRotationManager.shutdown();
+        }
         if (cooldownManager != null) {
             cooldownManager.shutdown();
         }
@@ -96,6 +101,10 @@ public final class ShopkeepersStockControl extends JavaPlugin {
         // Cooldown manager
         cooldownManager = new CooldownManager(this, tradeDataManager);
         cooldownManager.initialize();
+
+        // Pool rotation manager
+        poolRotationManager = new PoolRotationManager(this, dataStore, tradeDataManager);
+        poolRotationManager.initialize();
     }
 
     private void initializeDataLayer() {
@@ -158,6 +167,9 @@ public final class ShopkeepersStockControl extends JavaPlugin {
             messageManager.reload();
             tradeDataManager.restartBatchWriteTask();
             cooldownManager.restart();
+            // Drop snapshots for pools that were removed / seed snapshots for new pools.
+            // Existing pools keep their current rotation until the next scheduled boundary.
+            poolRotationManager.reconcileWithConfig();
         }
         return success;
     }
@@ -184,6 +196,10 @@ public final class ShopkeepersStockControl extends JavaPlugin {
 
     public CooldownManager getCooldownManager() {
         return cooldownManager;
+    }
+
+    public PoolRotationManager getPoolRotationManager() {
+        return poolRotationManager;
     }
 
 }

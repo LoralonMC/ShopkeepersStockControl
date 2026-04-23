@@ -38,6 +38,11 @@ public class SQLiteDataStore implements DataStore {
     private PreparedStatement deleteGlobalTradeStmt;
     private PreparedStatement deleteGlobalShopStmt;
 
+    // Pool rotation state prepared statements
+    private PreparedStatement loadAllRotationStatesStmt;
+    private PreparedStatement upsertRotationStateStmt;
+    private PreparedStatement deleteRotationStateStmt;
+
     public SQLiteDataStore(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
         this.operational = false;
@@ -117,10 +122,22 @@ public class SQLiteDataStore implements DataStore {
                 );
                 """;
 
+        String createRotationTableSQL = """
+                CREATE TABLE IF NOT EXISTS pool_rotation_state (
+                    shop_id TEXT NOT NULL,
+                    pool_name TEXT NOT NULL,
+                    period_index INTEGER NOT NULL,
+                    active_items TEXT NOT NULL,
+                    advances_at INTEGER NOT NULL,
+                    PRIMARY KEY (shop_id, pool_name)
+                );
+                """;
+
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createTableSQL);
             stmt.execute(createPlayerShopIndexSQL);
             stmt.execute(createGlobalTableSQL);
+            stmt.execute(createRotationTableSQL);
         }
 
         plugin.getLogger().info("Database tables created/verified successfully");
@@ -211,6 +228,25 @@ public class SQLiteDataStore implements DataStore {
 
         deleteGlobalShopStmt = connection.prepareStatement(
                 "DELETE FROM global_trades WHERE shop_id = ?"
+        );
+
+        // Pool rotation state statements
+        loadAllRotationStatesStmt = connection.prepareStatement(
+                "SELECT shop_id, pool_name, period_index, active_items, advances_at FROM pool_rotation_state"
+        );
+
+        upsertRotationStateStmt = connection.prepareStatement("""
+                INSERT INTO pool_rotation_state (shop_id, pool_name, period_index, active_items, advances_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(shop_id, pool_name)
+                DO UPDATE SET
+                    period_index = excluded.period_index,
+                    active_items = excluded.active_items,
+                    advances_at = excluded.advances_at
+                """);
+
+        deleteRotationStateStmt = connection.prepareStatement(
+                "DELETE FROM pool_rotation_state WHERE shop_id = ? AND pool_name = ?"
         );
     }
 
@@ -547,6 +583,56 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
+    public synchronized List<RotationState> loadAllRotationStates() {
+        List<RotationState> result = new ArrayList<>();
+        if (!operational) return result;
+
+        try (ResultSet rs = loadAllRotationStatesStmt.executeQuery()) {
+            while (rs.next()) {
+                String shopId = rs.getString("shop_id");
+                String poolName = rs.getString("pool_name");
+                long periodIndex = rs.getLong("period_index");
+                String activeItemsCsv = rs.getString("active_items");
+                long advancesAt = rs.getLong("advances_at");
+                List<String> activeItems = activeItemsCsv.isEmpty()
+                        ? List.of()
+                        : List.of(activeItemsCsv.split(","));
+                result.add(new RotationState(shopId, poolName, periodIndex, activeItems, advancesAt));
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error loading pool rotation states", e);
+        }
+        return result;
+    }
+
+    @Override
+    public synchronized void saveRotationState(RotationState state) {
+        if (!operational) return;
+        try {
+            upsertRotationStateStmt.setString(1, state.getShopId());
+            upsertRotationStateStmt.setString(2, state.getPoolName());
+            upsertRotationStateStmt.setLong(3, state.getPeriodIndex());
+            upsertRotationStateStmt.setString(4, String.join(",", state.getActiveItems()));
+            upsertRotationStateStmt.setLong(5, state.getAdvancesAt());
+            upsertRotationStateStmt.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error saving pool rotation state", e);
+        }
+    }
+
+    @Override
+    public synchronized void deleteRotationState(String shopId, String poolName) {
+        if (!operational) return;
+        try {
+            deleteRotationStateStmt.setString(1, shopId);
+            deleteRotationStateStmt.setString(2, poolName);
+            deleteRotationStateStmt.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.SEVERE, "Error deleting pool rotation state", e);
+        }
+    }
+
+    @Override
     public boolean isOperational() {
         return operational && connection != null;
     }
@@ -570,6 +656,9 @@ public class SQLiteDataStore implements DataStore {
             if (upsertGlobalTradeStmt != null) upsertGlobalTradeStmt.close();
             if (deleteGlobalTradeStmt != null) deleteGlobalTradeStmt.close();
             if (deleteGlobalShopStmt != null) deleteGlobalShopStmt.close();
+            if (loadAllRotationStatesStmt != null) loadAllRotationStatesStmt.close();
+            if (upsertRotationStateStmt != null) upsertRotationStateStmt.close();
+            if (deleteRotationStateStmt != null) deleteRotationStateStmt.close();
 
             // Close connection
             if (connection != null && !connection.isClosed()) {

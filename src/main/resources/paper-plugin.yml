@@ -29,6 +29,7 @@ permissions:
       shopkeepersstock.info: true
       shopkeepersstock.debug: true
       shopkeepersstock.cleanup: true
+      shopkeepersstock.rotation: true
       shopkeepersstock.help: true
   shopkeepersstock.reload:
     description: 'Reload configuration'
@@ -50,6 +51,9 @@ permissions:
     default: op
   shopkeepersstock.cleanup:
     description: 'Trigger expired data cleanup'
+    default: op
+  shopkeepersstock.rotation:
+    description: 'View and force rotation pool advances'
     default: op
   shopkeepersstock.help:
     description: 'View command help'

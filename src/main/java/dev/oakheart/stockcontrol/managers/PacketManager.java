@@ -4,14 +4,22 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.protocol.recipe.data.MerchantOffer;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMerchantOffers;
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
+import dev.oakheart.stockcontrol.data.PoolConfig;
+import dev.oakheart.stockcontrol.data.PoolItemConfig;
+import dev.oakheart.stockcontrol.data.RotationState;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.ShopContext;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.listeners.PacketListener;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.MerchantInventory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,9 +46,18 @@ public class PacketManager {
     // Players whose next MERCHANT_OFFERS packet should be cached (set on shop open, consumed by packet listener)
     private final Set<UUID> pendingCache;
 
-    // Debounced stock push: shops that need a push next tick (collapses rapid trades into one push)
+    // Stock pushes are collected across the current tick window and drained together on the next
+    // tick. Adding a shopId is idempotent (ConcurrentHashMap.newKeySet dedupes), so two trades on
+    // the same shop in the same tick produce one push.
     private final Set<String> pendingStockPushes;
-    private boolean pushTaskScheduled;
+    // Rotation pushes behave like stock pushes but additionally return any merchant input items to
+    // each viewer's inventory, clearing any stale trade selection that the rotation invalidated.
+    private final Set<String> pendingRotationPushes;
+
+    // Per-player UI→Shopkeepers-source slot mapping for the currently open merchant.
+    // Populated when a pooled-shop packet is rebuilt; consumed by the inbound
+    // SELECT_TRADE listener to remap the client's index back to what Shopkeepers expects.
+    private final Map<UUID, List<Integer>> uiToSourceMaps;
 
     private PacketListener packetListener;
 
@@ -64,6 +81,8 @@ public class PacketManager {
         this.playerMerchantData = new ConcurrentHashMap<>();
         this.pendingCache = ConcurrentHashMap.newKeySet();
         this.pendingStockPushes = ConcurrentHashMap.newKeySet();
+        this.pendingRotationPushes = ConcurrentHashMap.newKeySet();
+        this.uiToSourceMaps = new ConcurrentHashMap<>();
     }
 
     /**
@@ -95,6 +114,8 @@ public class PacketManager {
         playerMerchantData.clear();
         pendingCache.clear();
         pendingStockPushes.clear();
+        pendingRotationPushes.clear();
+        uiToSourceMaps.clear();
         plugin.getLogger().info("PacketManager shutdown complete");
     }
 
@@ -128,6 +149,7 @@ public class PacketManager {
         ShopContext removed = playerShopCache.remove(playerId);
         playerMerchantData.remove(playerId);
         pendingCache.remove(playerId);
+        uiToSourceMaps.remove(playerId);
 
         if (removed != null && plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info("Removed shop mapping: " + playerId + " -> " + removed.shopId());
@@ -169,70 +191,168 @@ public class PacketManager {
 
         // Not a tracked shop or context expired
         if (context == null) {
+            uiToSourceMaps.remove(player.getUniqueId());
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("No shop context for " + player.getName() + " - not modifying packet");
             }
             return;
         }
 
-        String shopId = context.shopId();
+        applyPacketModifications(player, packet, context.shopId());
+    }
 
-        // Check if this shop is enabled for tracking
+    /**
+     * Applies packet modifications when the shopId is already known, bypassing the
+     * TTL-guarded context lookup. Used by the live stock push so an expired TTL doesn't
+     * leak an un-rebuilt 5-offer packet to a player still viewing the shop.
+     */
+    private void applyPacketModifications(Player player, WrapperPlayServerMerchantOffers packet, String shopId) {
         ShopConfig shopConfig = plugin.getConfigManager().getShop(shopId);
         if (shopConfig == null || !shopConfig.isEnabled()) {
+            uiToSourceMaps.remove(player.getUniqueId());
             if (plugin.getConfigManager().isDebugMode()) {
                 plugin.getLogger().info("Shop " + shopId + " not tracked or disabled - not modifying packet");
             }
             return;
         }
 
-        // Get trade configurations by slot
-        Map<Integer, TradeConfig> slotMap = shopConfig.getTradesBySlot();
+        if (shopConfig.hasPools()) {
+            rebuildWithPools(player, packet, shopConfig);
+        } else {
+            // No pools configured — legacy in-place path. UI slot == Shopkeepers source.
+            uiToSourceMaps.remove(player.getUniqueId());
+            modifyInPlace(player, packet, shopConfig);
+        }
+    }
 
-        // Get original offers
+    private void modifyInPlace(Player player, WrapperPlayServerMerchantOffers packet, ShopConfig shopConfig) {
+        Map<Integer, TradeConfig> slotMap = shopConfig.getTradesBySlot();
         var offers = packet.getMerchantOffers();
 
         if (plugin.getConfigManager().isDebugMode()) {
-            plugin.getLogger().info("Modifying merchant packet: " + offers.size() + " offers, " + slotMap.size() + " configured slots");
+            plugin.getLogger().info("Modifying merchant packet: " + offers.size() + " offers, "
+                    + slotMap.size() + " configured slots");
         }
 
-        // Modify each offer based on player's remaining trades
         for (int slot = 0; slot < offers.size(); slot++) {
             TradeConfig tradeConfig = slotMap.get(slot);
-
-            // This slot is not tracked in config
-            if (tradeConfig == null) {
-                continue;
-            }
+            if (tradeConfig == null) continue;
 
             var offer = offers.get(slot);
-            int remaining = tradeDataManager.getRemainingTrades(
-                    player.getUniqueId(),
-                    shopId,
-                    tradeConfig.getTradeKey()
-            );
-
-            // For shared mode with per-player cap, show the per-player cap as the max
-            int displayMax;
-            if (shopConfig.isShared() && tradeConfig.getMaxPerPlayer() > 0) {
-                displayMax = tradeConfig.getMaxPerPlayer();
-            } else {
-                displayMax = tradeConfig.getMaxTrades();
-            }
-            int used = displayMax - remaining;
-
-            // Show exact stock numbers - client will auto-cross-out when uses >= maxUses
-            offer.setUses(Math.max(0, used));
-            offer.setMaxUses(displayMax);
+            applyLimitsToOffer(player, shopConfig, tradeConfig.getTradeKey(),
+                    tradeConfig.getMaxTrades(), tradeConfig.getMaxPerPlayer(), offer);
 
             if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("Slot " + slot + " [" + tradeConfig.getTradeKey() + "]:");
-                plugin.getLogger().info("  Remaining: " + remaining + "/" + displayMax +
-                        (shopConfig.isShared() ? " (shared)" : "") + " (used: " + Math.max(0, used) + ")");
-                plugin.getLogger().info("  Setting to: uses=" + Math.max(0, used) + ", maxUses=" + displayMax);
+                plugin.getLogger().info("Slot " + slot + " [" + tradeConfig.getTradeKey()
+                        + "]: uses=" + offer.getUses() + "/" + offer.getMaxUses());
             }
         }
     }
+
+    /**
+     * Rebuilds the outgoing offer list in UI order, hiding pool items that aren't currently active.
+     * Also records the per-player UI→source slot map so inbound SELECT_TRADE can be remapped.
+     */
+    private void rebuildWithPools(Player player, WrapperPlayServerMerchantOffers packet, ShopConfig shopConfig) {
+        List<MerchantOffer> originals = packet.getMerchantOffers();
+        Map<Integer, TradeConfig> staticByUi = shopConfig.getTradesBySlot();
+
+        // Build assignment: which (pool, item) occupies each UI slot this period.
+        Map<Integer, PoolSlotAssignment> poolByUi = new HashMap<>();
+        int maxUiSlot = -1;
+        for (TradeConfig t : shopConfig.getTrades().values()) {
+            maxUiSlot = Math.max(maxUiSlot, t.getSlot());
+        }
+        for (PoolConfig pool : shopConfig.getPools().values()) {
+            RotationState state = plugin.getPoolRotationManager().getState(shopConfig.getShopId(), pool.getName());
+            if (state == null) continue;
+            List<String> active = state.getActiveItems();
+            List<Integer> uiSlots = pool.getUiSlots();
+            for (int i = 0; i < uiSlots.size() && i < active.size(); i++) {
+                int ui = uiSlots.get(i);
+                poolByUi.put(ui, new PoolSlotAssignment(pool, active.get(i)));
+                maxUiSlot = Math.max(maxUiSlot, ui);
+            }
+        }
+
+        List<MerchantOffer> newOffers = new ArrayList<>();
+        List<Integer> uiToSource = new ArrayList<>();
+
+        for (int ui = 0; ui <= maxUiSlot; ui++) {
+            TradeConfig staticTrade = staticByUi.get(ui);
+            PoolSlotAssignment poolAssign = poolByUi.get(ui);
+
+            if (staticTrade != null) {
+                int src = staticTrade.getSourceSlot();
+                MerchantOffer offer = cloneSingle(originals, src);
+                if (offer == null) continue;
+                applyLimitsToOffer(player, shopConfig, staticTrade.getTradeKey(),
+                        staticTrade.getMaxTrades(), staticTrade.getMaxPerPlayer(), offer);
+                newOffers.add(offer);
+                uiToSource.add(src);
+            } else if (poolAssign != null) {
+                PoolItemConfig item = poolAssign.pool().getItem(poolAssign.itemKey());
+                if (item == null) continue;
+                int src = item.getSourceSlot();
+                MerchantOffer offer = cloneSingle(originals, src);
+                if (offer == null) continue;
+                applyLimitsToOffer(player, shopConfig, item.getItemKey(),
+                        item.getMaxTrades(), item.getMaxPerPlayer(), offer);
+                newOffers.add(offer);
+                uiToSource.add(src);
+            }
+            // UI slot has neither static nor pool assignment → not appended (no offer at this position).
+        }
+
+        packet.setMerchantOffers(newOffers);
+        uiToSourceMaps.put(player.getUniqueId(), List.copyOf(uiToSource));
+
+        if (plugin.getConfigManager().isDebugMode()) {
+            plugin.getLogger().info("Rebuilt merchant packet for " + player.getName()
+                    + " in shop " + shopConfig.getShopId()
+                    + ": " + originals.size() + " source offers → " + newOffers.size() + " shown"
+                    + " (uiToSource=" + uiToSource + ")");
+        }
+    }
+
+    /**
+     * Applies the correct uses/maxUses to an offer based on the player's remaining trades.
+     * For shared shops with a per-player cap, the cap is used as the display max.
+     */
+    private void applyLimitsToOffer(Player player, ShopConfig shopConfig, String tradeKey,
+                                    int maxTrades, int maxPerPlayer, MerchantOffer offer) {
+        int remaining = tradeDataManager.getRemainingTrades(player.getUniqueId(), shopConfig.getShopId(), tradeKey);
+        int displayMax = (shopConfig.isShared() && maxPerPlayer > 0) ? maxPerPlayer : maxTrades;
+        int used = displayMax - remaining;
+        offer.setUses(Math.max(0, used));
+        offer.setMaxUses(displayMax);
+    }
+
+    private static MerchantOffer cloneSingle(List<MerchantOffer> originals, int sourceSlot) {
+        if (sourceSlot < 0 || sourceSlot >= originals.size()) return null;
+        MerchantOffer offer = originals.get(sourceSlot);
+        return MerchantOffer.of(
+                offer.getFirstInputItem(),
+                offer.getSecondInputItem(),
+                offer.getOutputItem(),
+                offer.getUses(),
+                offer.getMaxUses(),
+                offer.getXp(),
+                offer.getSpecialPrice(),
+                offer.getPriceMultiplier(),
+                offer.getDemand()
+        );
+    }
+
+    /**
+     * Returns the recorded UI→source mapping for a player (inbound SELECT_TRADE remap).
+     * Returns null if the player doesn't have a rebuilt merchant UI open.
+     */
+    public List<Integer> getUiToSourceMap(UUID playerId) {
+        return uiToSourceMaps.get(playerId);
+    }
+
+    private record PoolSlotAssignment(PoolConfig pool, String itemKey) {}
 
     // ===== Shared Stock Live Updates =====
 
@@ -280,26 +400,42 @@ public class PacketManager {
      */
     public void scheduleSharedStockPush(String shopId) {
         pendingStockPushes.add(shopId);
-
-        if (!pushTaskScheduled) {
-            pushTaskScheduled = true;
-            Bukkit.getScheduler().runTaskLater(plugin, this::processPendingPushes, 1L);
-        }
+        // Schedule unconditionally from either thread; the drain-on-next-tick handler is a no-op
+        // when the set is already empty. A per-call Bukkit task is far cheaper than the
+        // cross-thread synchronization a debounce flag would require.
+        Bukkit.getScheduler().runTaskLater(plugin, this::processPendingPushes, 1L);
     }
 
     /**
-     * Processes all pending stock pushes. Runs on the next tick after trades are recorded.
-     * Drains the pending set and pushes updated packets to all viewers of each affected shop.
+     * Schedules a rotation-driven push. In addition to the normal stock rebuild, this returns
+     * any merchant-input items back to each viewer's inventory so a stale trade selection
+     * (populated before the rotation) can't complete against the wrong item.
+     */
+    public void scheduleRotationPush(String shopId) {
+        pendingRotationPushes.add(shopId);
+        Bukkit.getScheduler().runTaskLater(plugin, this::processPendingPushes, 1L);
+    }
+
+    /**
+     * Processes all pending stock pushes. Runs on the next tick after trades or rotations.
+     * Drains the pending sets and pushes updated packets to all viewers of each affected shop.
+     * Shops that appear in both sets are treated as rotation pushes (superset of the normal push).
      */
     private void processPendingPushes() {
-        pushTaskScheduled = false;
+        Set<String> rotationShops = pendingRotationPushes.isEmpty()
+                ? Set.of() : Set.copyOf(pendingRotationPushes);
+        pendingRotationPushes.clear();
 
-        // Drain all pending shops
-        Set<String> shopsToPush = Set.copyOf(pendingStockPushes);
+        Set<String> stockShops = pendingStockPushes.isEmpty()
+                ? Set.of() : Set.copyOf(pendingStockPushes);
         pendingStockPushes.clear();
 
-        for (String shopId : shopsToPush) {
-            pushSharedStockUpdate(shopId);
+        for (String shopId : rotationShops) {
+            pushSharedStockUpdate(shopId, true);
+        }
+        for (String shopId : stockShops) {
+            if (rotationShops.contains(shopId)) continue; // already handled as rotation push
+            pushSharedStockUpdate(shopId, false);
         }
     }
 
@@ -309,18 +445,27 @@ public class PacketManager {
      *
      * @param shopId The shop identifier
      */
-    private void pushSharedStockUpdate(String shopId) {
+    private void pushSharedStockUpdate(String shopId, boolean returnInputs) {
         for (Map.Entry<UUID, ShopContext> entry : playerShopCache.entrySet()) {
             UUID viewerId = entry.getKey();
             ShopContext context = entry.getValue();
 
-            if (context.isExpired() || !context.shopId().equals(shopId)) continue;
+            // Don't skip on TTL expiry — TTL is a stale-entry safety net, not a "shop closed"
+            // signal. Players can sit in an open merchant UI longer than the TTL window between
+            // activity. The isOnline() check below covers the real liveness question.
+            if (!context.shopId().equals(shopId)) continue;
 
             CachedMerchantData cached = playerMerchantData.get(viewerId);
             if (cached == null) continue;
 
             Player viewer = Bukkit.getPlayer(viewerId);
             if (viewer == null || !viewer.isOnline()) continue;
+
+            // Rotation pushes: return any in-progress trade inputs before re-sending the packet
+            // so a previously-selected (now stale) trade can't complete against the new item.
+            if (returnInputs) {
+                returnMerchantInputs(viewer);
+            }
 
             // Clone offers from cache so modifications don't corrupt the originals
             List<MerchantOffer> offers = cloneOffers(cached.offers());
@@ -331,16 +476,44 @@ public class PacketManager {
                     cached.villagerXp(), cached.showProgress(), cached.canRestock()
             );
 
-            // Apply current stock modifications for this viewer
-            modifyMerchantPacket(viewer, packet);
+            // Apply current stock modifications for this viewer using the known shopId.
+            // Bypasses TTL-guarded context lookup — viewers still watching after their TTL expired
+            // would otherwise get an unmodified 5-offer packet leaked to their client.
+            applyPacketModifications(viewer, packet, shopId);
 
-            // Send the updated packet
-            PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, packet);
+            // Send silently — sendPacket would re-trigger our own PacketListener and double-rebuild
+            // the already-rebuilt offer list, treating it as if it were the raw 5-offer Shopkeepers packet.
+            PacketEvents.getAPI().getPlayerManager().sendPacketSilently(viewer, packet);
 
             if (plugin.getConfigManager().isDebugMode()) {
-                plugin.getLogger().info("Pushed stock update to " + viewer.getName() + " for shop " + shopId);
+                plugin.getLogger().info("Pushed " + (returnInputs ? "rotation " : "")
+                        + "stock update to " + viewer.getName() + " for shop " + shopId);
             }
         }
+    }
+
+    /**
+     * Returns any merchant input items to the viewer's inventory and clears the output slot.
+     * Called on rotation advance so a previously-selected stale trade can't complete against
+     * a now-different item at the same UI slot. Leftover items that don't fit are dropped at
+     * the player's location so nothing is lost.
+     */
+    private void returnMerchantInputs(Player viewer) {
+        InventoryView view = viewer.getOpenInventory();
+        Inventory top = view.getTopInventory();
+        if (!(top instanceof MerchantInventory merchantInv)) return;
+
+        for (int slot = 0; slot < 2; slot++) {
+            ItemStack item = merchantInv.getItem(slot);
+            if (item == null || item.getType().isAir()) continue;
+            Map<Integer, ItemStack> leftover = viewer.getInventory().addItem(item);
+            for (ItemStack drop : leftover.values()) {
+                viewer.getWorld().dropItemNaturally(viewer.getLocation(), drop);
+            }
+            merchantInv.setItem(slot, null);
+        }
+        // Clear the output slot — the server populated it from the previously-selected recipe.
+        merchantInv.setItem(2, null);
     }
 
     /**

@@ -2,6 +2,8 @@ package dev.oakheart.stockcontrol.placeholders;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
 import dev.oakheart.stockcontrol.data.CooldownMode;
+import dev.oakheart.stockcontrol.data.PoolConfig;
+import dev.oakheart.stockcontrol.data.RotationState;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.managers.TradeDataManager;
@@ -9,6 +11,8 @@ import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.time.ZonedDateTime;
 
 /**
  * PlaceholderAPI expansion for ShopkeepersStockControl.
@@ -24,6 +28,10 @@ import org.jetbrains.annotations.Nullable;
  *   %ssc_resettime_<shop>:<trade>%        - Reset time display (e.g., "00:00", "Monday 00:00", "Never")
  *   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g., "100")
  *   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g., "73")
+ *
+ * Rotation-pool placeholders (use pool name instead of trade key):
+ *   %ssc_poolactive_<shop>:<pool>%        - Comma-separated active item keys (e.g., "summer_melon,berry_pie")
+ *   %ssc_poolnext_<shop>:<pool>%          - Time until next rotation (e.g., "5h 23m")
  */
 public class StockControlExpansion extends PlaceholderExpansion {
 
@@ -69,7 +77,7 @@ public class StockControlExpansion extends PlaceholderExpansion {
         if (colonIndex == -1) return null;
 
         String shopIdentifier = identifier.substring(0, colonIndex);
-        String tradeKey = identifier.substring(colonIndex + 1);
+        String rest = identifier.substring(colonIndex + 1);
 
         // Try shop ID first, then fall back to display name lookup
         ShopConfig shopConfig = plugin.getConfigManager().getShop(shopIdentifier);
@@ -80,7 +88,14 @@ public class StockControlExpansion extends PlaceholderExpansion {
 
         String shopId = shopConfig.getShopId();
 
-        TradeConfig tradeConfig = shopConfig.getTrade(tradeKey);
+        // Rotation-pool placeholders use the 'pool' name (instead of trade key) as the entity.
+        if (action.equals("poolactive") || action.equals("poolnext")) {
+            return resolvePoolPlaceholder(shopConfig, rest, action);
+        }
+
+        // Trade-level placeholders — pool items resolve through the unified lookup.
+        String tradeKey = rest;
+        TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig == null) return null;
 
         TradeDataManager tdm = plugin.getTradeDataManager();
@@ -127,5 +142,21 @@ public class StockControlExpansion extends PlaceholderExpansion {
             default:
                 return null;
         }
+    }
+
+    private String resolvePoolPlaceholder(ShopConfig shopConfig, String poolName, String action) {
+        PoolConfig pool = shopConfig.getPool(poolName);
+        if (pool == null) return null;
+
+        RotationState state = plugin.getPoolRotationManager().getState(shopConfig.getShopId(), poolName);
+        return switch (action) {
+            case "poolactive" -> state == null ? "" : String.join(",", state.getActiveItems());
+            case "poolnext" -> {
+                if (state == null) yield "";
+                long secondsLeft = Math.max(0, state.getAdvancesAt() - ZonedDateTime.now().toEpochSecond());
+                yield plugin.getTradeDataManager().formatDuration(secondsLeft);
+            }
+            default -> null;
+        };
     }
 }

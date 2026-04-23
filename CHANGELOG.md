@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Rotation pools — shops can now declare named pools that cycle through a set of items on a daily, weekly, or interval schedule. Each pool owns UI slots and shows only `visible` items per period; non-active items are fully hidden. Selection is deterministic across restarts and server-wide.
+- Static trades can now split the UI slot a player sees from the Shopkeepers editor source slot via an optional `source:` field.
+- New command: `/ssc rotation peek <shop>` shows current active items and time-to-next for each pool.
+- New command: `/ssc rotation force <shop> [pool]` manually advances all pools (or one) in a shop for testing.
+- New permission: `shopkeepersstock.rotation`.
+- New placeholders: `%ssc_poolactive_<shop>:<pool>%` (active items) and `%ssc_poolnext_<shop>:<pool>%` (time until next rotation).
+- Rotation counter semantics: each scheduled advance wipes per-player and global counters for the newly-active items so each rotation feels like a fresh shop.
+
 ### Changed
 
 - Migrate to OakheartLib shared library (config, messages, commands)

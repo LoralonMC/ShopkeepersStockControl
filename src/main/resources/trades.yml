@@ -44,6 +44,32 @@
 # HIERARCHY: Per-trade settings override per-shop settings.
 # If a trade doesn't specify cooldown-mode/reset-time/reset-day, it inherits from the shop.
 # If the shop doesn't specify them either, defaults are: rolling / 00:00 / monday.
+#
+# ROTATION POOLS (optional):
+# A shop can declare named rotation pools that cycle through a set of items.
+# Each pool owns a set of UI slots and shows 'visible' items at a time, rotating
+# on its own schedule. Items not currently in rotation are fully hidden from players.
+#
+# pools:
+#   <pool_name>:
+#     ui-slots:                 # UI positions this pool occupies (block list — flow [4,5] is NOT supported)
+#       - 4
+#       - 5
+#     visible: 2                # how many items to show (must equal ui-slots size)
+#     mode: random              # random | sequential
+#     schedule: daily           # daily | weekly | interval
+#     reset-time: "00:00"       # when daily/weekly rotations advance
+#     reset-day: "monday"       # for weekly schedule only
+#     every: 6h                 # for interval schedule only (s/m/h/d units)
+#     items:
+#       <item_key>:
+#         source: 10            # Shopkeepers editor slot for this item
+#         max-trades: 5
+#         # cooldown, cooldown-mode, reset-time, reset-day, max-per-player all supported
+#         # same as static trades (inherit from shop if omitted)
+#
+# Setup: place every pool candidate item in the Shopkeepers editor at its 'source' slot.
+# The plugin filters the merchant packet to show only active items per rotation.
 
 # EXAMPLE configurations (replace these with your actual Shopkeeper UUIDs!)
 # These are just examples to show the format - they won't work without real IDs

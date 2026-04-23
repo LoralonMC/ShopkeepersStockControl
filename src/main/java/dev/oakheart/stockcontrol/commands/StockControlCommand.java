@@ -141,6 +141,44 @@ public class StockControlCommand {
                 .then(Commands.literal("check")
                         .requires(src -> src.getSender().hasPermission("shopkeepersstock.check"))
                         .then(buildPlayerShopTradeArgs(false)))
+                // rotation peek <shop> | rotation force <shop> [pool]
+                .then(Commands.literal("rotation")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.rotation"))
+                        .then(Commands.literal("peek")
+                                .then(Commands.argument("shop", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> suggestPooledShops(builder))
+                                        .executes(ctx -> {
+                                            handleRotationPeek(ctx.getSource().getSender(),
+                                                    StringArgumentType.getString(ctx, "shop"));
+                                            return Command.SINGLE_SUCCESS;
+                                        })))
+                        .then(Commands.literal("force")
+                                .then(Commands.argument("shop", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> suggestPooledShops(builder))
+                                        .executes(ctx -> {
+                                            handleRotationForce(ctx.getSource().getSender(),
+                                                    StringArgumentType.getString(ctx, "shop"), null);
+                                            return Command.SINGLE_SUCCESS;
+                                        })
+                                        .then(Commands.argument("pool", StringArgumentType.word())
+                                                .suggests((ctx, builder) -> {
+                                                    ShopConfig shop = resolveShop(StringArgumentType.getString(ctx, "shop"));
+                                                    if (shop != null) {
+                                                        String input = builder.getRemainingLowerCase();
+                                                        for (String poolName : shop.getPools().keySet()) {
+                                                            if (poolName.toLowerCase().startsWith(input)) {
+                                                                builder.suggest(poolName);
+                                                            }
+                                                        }
+                                                    }
+                                                    return builder.buildFuture();
+                                                })
+                                                .executes(ctx -> {
+                                                    handleRotationForce(ctx.getSource().getSender(),
+                                                            StringArgumentType.getString(ctx, "shop"),
+                                                            StringArgumentType.getString(ctx, "pool"));
+                                                    return Command.SINGLE_SUCCESS;
+                                                })))))
                 .build();
     }
 
@@ -360,6 +398,77 @@ public class StockControlCommand {
         }
     }
 
+    // ===== Rotation =====
+
+    private java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestPooledShops(
+            com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        String input = builder.getRemainingLowerCase();
+        for (ShopConfig shop : plugin.getConfigManager().getShops().values()) {
+            if (!shop.hasPools()) continue;
+            String name = commandName(shop.getName());
+            if (name.toLowerCase().startsWith(input)) {
+                builder.suggest(name);
+            }
+        }
+        return builder.buildFuture();
+    }
+
+    private void handleRotationPeek(CommandSender sender, String shopArg) {
+        ShopConfig shop = resolveShop(shopArg);
+        if (shop == null) {
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
+            return;
+        }
+        if (!shop.hasPools()) {
+            messageManager.sendCommand(sender, "rotation-no-pools",
+                    Placeholder.unparsed("name", shop.getName()));
+            return;
+        }
+
+        messageManager.sendCommand(sender, "rotation-peek-header",
+                Placeholder.unparsed("name", shop.getName()));
+
+        long now = java.time.ZonedDateTime.now().toEpochSecond();
+        for (PoolConfig pool : shop.getPools().values()) {
+            RotationState state = plugin.getPoolRotationManager().getState(shop.getShopId(), pool.getName());
+            String active = state == null ? "(no state yet)" : String.join(", ", state.getActiveItems());
+            String nextIn = state == null
+                    ? "?"
+                    : plugin.getTradeDataManager().formatDuration(Math.max(0, state.getAdvancesAt() - now));
+
+            messageManager.sendCommand(sender, "rotation-peek-pool",
+                    Placeholder.unparsed("pool", pool.getName()),
+                    Placeholder.unparsed("active", active),
+                    Placeholder.unparsed("next", nextIn));
+        }
+    }
+
+    private void handleRotationForce(CommandSender sender, String shopArg, String poolArg) {
+        ShopConfig shop = resolveShop(shopArg);
+        if (shop == null) {
+            messageManager.sendCommand(sender, "error-shop-not-found",
+                    Placeholder.unparsed("shop", shopArg));
+            return;
+        }
+        if (!shop.hasPools()) {
+            messageManager.sendCommand(sender, "rotation-no-pools",
+                    Placeholder.unparsed("name", shop.getName()));
+            return;
+        }
+        if (poolArg != null && !shop.getPools().containsKey(poolArg)) {
+            messageManager.sendCommand(sender, "rotation-pool-not-found",
+                    Placeholder.unparsed("pool", poolArg),
+                    Placeholder.unparsed("name", shop.getName()));
+            return;
+        }
+
+        int advanced = plugin.getPoolRotationManager().forceAdvance(shop.getShopId(), poolArg);
+        messageManager.sendCommand(sender, "rotation-force-success",
+                Placeholder.unparsed("count", String.valueOf(advanced)),
+                Placeholder.unparsed("name", shop.getName()));
+    }
+
     // ===== Reset handlers =====
 
     private void handleResetPlayer(CommandSender sender, String playerName) {
@@ -561,9 +670,8 @@ public class StockControlCommand {
             long timeRemaining = cooldownExpired ? 0 : plugin.getTradeDataManager().getTimeUntilReset(playerId, data.getShopId(), data.getTradeKey());
 
             ShopConfig shop = plugin.getConfigManager().getShop(data.getShopId());
-            int maxTrades = shop != null && shop.getTrade(data.getTradeKey()) != null
-                    ? shop.getTrade(data.getTradeKey()).getMaxTrades()
-                    : data.getTradesUsed();
+            TradeConfig resolved = shop != null ? shop.findTradeLimits(data.getTradeKey()) : null;
+            int maxTrades = resolved != null ? resolved.getMaxTrades() : data.getTradesUsed();
 
             String shopName = shop != null ? shop.getName() : data.getShopId();
             int usedCount = cooldownExpired ? 0 : data.getTradesUsed();

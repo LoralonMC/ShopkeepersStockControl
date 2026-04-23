@@ -2,6 +2,7 @@ package dev.oakheart.stockcontrol.data;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -17,8 +18,16 @@ public class ShopConfig {
     private final String resetDay;    // Day of week for weekly mode (e.g., "MONDAY")
     private final StockMode stockMode;       // per_player or shared
     private final int maxPerPlayer;          // Default per-player cap for shared mode (0 = no cap)
-    private final Map<String, TradeConfig> trades;  // Key: tradeKey, Value: TradeConfig
-    private final Map<Integer, TradeConfig> tradesBySlot;  // Cached slot-to-trade mapping
+    private final Map<String, TradeConfig> trades;  // Key: tradeKey — static trades only
+    private final Map<Integer, TradeConfig> tradesBySlot;  // Static trades keyed by UI slot (== source for legacy)
+    private final Map<String, PoolConfig> pools;    // Key: pool name (empty if no pools configured)
+    // Unified lookup for limits / cooldown config by trade key across statics and pool items.
+    // Pool items are represented as synthetic TradeConfigs so TradeDataManager can treat them
+    // identically to static trades for remaining/used/cooldown calculations.
+    private final Map<String, TradeConfig> allTradesByKey;
+    // Unified lookup by Shopkeepers source slot — used by the trade-completion listener to
+    // resolve which TradeConfig (static or pool item) corresponds to the slot the player clicked.
+    private final Map<Integer, TradeConfig> allTradesBySourceSlot;
 
     /**
      * Creates a new ShopConfig instance.
@@ -36,7 +45,8 @@ public class ShopConfig {
     public ShopConfig(String shopId, String name, boolean enabled,
                       CooldownMode cooldownMode, String resetTime, String resetDay,
                       StockMode stockMode, int maxPerPlayer,
-                      Map<String, TradeConfig> trades) {
+                      Map<String, TradeConfig> trades,
+                      Map<String, PoolConfig> pools) {
         this.shopId = shopId;
         this.name = name != null && !name.isEmpty() ? name : shopId;  // Fallback to shopId if no name
         this.enabled = enabled;
@@ -46,13 +56,54 @@ public class ShopConfig {
         this.stockMode = stockMode;
         this.maxPerPlayer = maxPerPlayer;
         this.trades = new HashMap<>(trades);
+        this.pools = new LinkedHashMap<>(pools);
 
-        // Pre-compute slot map for fast lookups during packet modification
+        // Pre-compute slot map for fast lookups during packet modification (legacy no-pools path)
         Map<Integer, TradeConfig> slotMap = new HashMap<>();
         for (TradeConfig trade : trades.values()) {
             slotMap.put(trade.getSlot(), trade);
         }
         this.tradesBySlot = Map.copyOf(slotMap);
+
+        // Unified key lookup — statics first, then each pool's items synthesized as TradeConfig
+        Map<String, TradeConfig> merged = new HashMap<>(trades);
+        for (PoolConfig pool : pools.values()) {
+            for (PoolItemConfig item : pool.getItems().values()) {
+                merged.put(item.getItemKey(), new TradeConfig(
+                        item.getItemKey(),
+                        -1,                          // no fixed UI slot; lookups don't use this
+                        item.getSourceSlot(),
+                        item.getMaxTrades(),
+                        item.getCooldownSeconds(),
+                        item.getCooldownMode(),
+                        item.getResetTime(),
+                        item.getResetDay(),
+                        item.getMaxPerPlayer()
+                ));
+            }
+        }
+        this.allTradesByKey = Map.copyOf(merged);
+
+        // Source-slot lookup — the trade-completion path gets a Shopkeepers recipe index and
+        // needs to find the TradeConfig whose source matches, regardless of static vs pool.
+        Map<Integer, TradeConfig> bySource = new HashMap<>();
+        for (TradeConfig t : merged.values()) {
+            if (t.getSourceSlot() >= 0) {
+                bySource.put(t.getSourceSlot(), t);
+            }
+        }
+        this.allTradesBySourceSlot = Map.copyOf(bySource);
+    }
+
+    /**
+     * Convenience constructor for shops without any rotation pools.
+     */
+    public ShopConfig(String shopId, String name, boolean enabled,
+                      CooldownMode cooldownMode, String resetTime, String resetDay,
+                      StockMode stockMode, int maxPerPlayer,
+                      Map<String, TradeConfig> trades) {
+        this(shopId, name, enabled, cooldownMode, resetTime, resetDay,
+                stockMode, maxPerPlayer, trades, Collections.emptyMap());
     }
 
     public String getShopId() {
@@ -106,6 +157,29 @@ public class ShopConfig {
     }
 
     /**
+     * Resolves trade limits by key across both static trades and pool items.
+     * Callers that just need max-trades / cooldown / reset-time for a trade key should use this.
+     *
+     * @param tradeKey The trade key
+     * @return A TradeConfig view of the limits, or null if no such trade or pool item exists
+     */
+    public TradeConfig findTradeLimits(String tradeKey) {
+        return allTradesByKey.get(tradeKey);
+    }
+
+    /**
+     * Resolves which TradeConfig corresponds to a Shopkeepers source slot.
+     * Covers both static trades and pool items, so the trade-completion listener can
+     * count trades on rotated items correctly.
+     *
+     * @param sourceSlot The index of the offer in the Shopkeepers-generated packet
+     * @return The TradeConfig for that source slot, or null if none is configured
+     */
+    public TradeConfig findBySourceSlot(int sourceSlot) {
+        return allTradesBySourceSlot.get(sourceSlot);
+    }
+
+    /**
      * Gets a trade configuration by its slot position.
      *
      * @param slot The slot number
@@ -122,6 +196,23 @@ public class ShopConfig {
      */
     public Map<Integer, TradeConfig> getTradesBySlot() {
         return tradesBySlot;
+    }
+
+    /**
+     * Gets all rotation pools configured for this shop.
+     *
+     * @return Unmodifiable map of pool name to PoolConfig (empty if none)
+     */
+    public Map<String, PoolConfig> getPools() {
+        return Collections.unmodifiableMap(pools);
+    }
+
+    public PoolConfig getPool(String poolName) {
+        return pools.get(poolName);
+    }
+
+    public boolean hasPools() {
+        return !pools.isEmpty();
     }
 
     @Override
