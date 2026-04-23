@@ -579,14 +579,16 @@ public class StockControlCommand {
     // ===== Stress test =====
 
     /**
-     * Concurrency stress test. Simulates N virtual players hammering canTrade/recordTrade
-     * on a single trade while, for pooled shops, force-advancing the rotation at a fast
-     * cadence. Async threads exercise code paths harder than any realistic trade load
-     * would, and all of it passes through the same locks and caches as real trades do.
+     * Concurrency stress test. Simulates N virtual players performing canTrade/recordTrade
+     * at a realistic rate (not "as fast as possible" — that just starves the main thread and
+     * tanks TPS without telling us anything useful about production behavior). Each virtual
+     * player averages ~1 op per 20ms, distributed across a small worker pool.
      *
-     * Data is isolated under deterministic stress UUIDs that are deleted at the end, but
-     * this still writes to the live DB and briefly contends with real traffic — only run
-     * it on a staging server or during a maintenance window.
+     * For pooled shops the rotation is force-advanced every 5 seconds in parallel so the
+     * reset/flush lock is exercised under contention with ongoing trades.
+     *
+     * Writes to the live DB under stress-only UUIDs which are cleaned up at the end. Still
+     * only safe to run during a maintenance window.
      */
     private void handleStress(CommandSender sender, String shopArg, String tradeKey,
                               int players, int durationSec) {
@@ -606,10 +608,18 @@ public class StockControlCommand {
         final String shopId = shop.getShopId();
         final boolean hasPools = shop.hasPools();
 
+        // Cap the thread pool well below core count so real server work still gets CPU.
+        final int workerCount = Math.min(players, Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+        // Each virtual player targets ~50 ops/sec (every 20ms). Per-worker delay accounts
+        // for how many virtual players that worker is round-robining through.
+        final int virtualsPerWorker = (players + workerCount - 1) / workerCount;
+        final long perOpSleepNanos = 20_000_000L / Math.max(1, virtualsPerWorker);
+
         sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#D89B6A>[stress] Running " + players + " virtual players for "
-                        + durationSec + "s on " + shop.getName() + ":" + tradeKey
-                        + (hasPools ? " (rotation force every 5s)" : "") + "…"));
+                "<#D89B6A>[stress] " + players + " virtual players × " + durationSec + "s on "
+                        + shop.getName() + ":" + tradeKey
+                        + (hasPools ? " (rotation force every 5s)" : "")
+                        + " | " + workerCount + " worker threads, ~50 ops/s per player"));
         sender.sendMessage(MINI_MESSAGE.deserialize(
                 "<#C27B6B>[stress] Writes to live DB. Cleanup runs at end."));
 
@@ -624,30 +634,52 @@ public class StockControlCommand {
         final java.util.concurrent.atomic.AtomicLong blocks = new java.util.concurrent.atomic.AtomicLong();
         final java.util.concurrent.atomic.AtomicLong errors = new java.util.concurrent.atomic.AtomicLong();
         final java.util.List<Throwable> firstErrors = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
-        final java.util.concurrent.ConcurrentLinkedQueue<Long> latenciesNs = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        // Reservoir sample: cap memory for latency recording regardless of op count.
+        final int latencyCapacity = 10_000;
+        final java.util.concurrent.atomic.AtomicLongArray latencyReservoir = new java.util.concurrent.atomic.AtomicLongArray(latencyCapacity);
+        final java.util.concurrent.atomic.AtomicLong latencyIndex = new java.util.concurrent.atomic.AtomicLong();
 
         final long deadlineNs = System.nanoTime() + durationSec * 1_000_000_000L;
-
         final java.util.concurrent.ExecutorService pool =
-                java.util.concurrent.Executors.newFixedThreadPool(Math.min(players, 64));
-        for (java.util.UUID id : fakeIds) {
+                java.util.concurrent.Executors.newFixedThreadPool(workerCount);
+
+        for (int w = 0; w < workerCount; w++) {
+            final int workerIndex = w;
             pool.submit(() -> {
-                while (System.nanoTime() < deadlineNs) {
-                    long t0 = System.nanoTime();
-                    try {
-                        plugin.getTradeDataManager().resetIfExpired(id, shopId, tradeKey);
-                        if (plugin.getTradeDataManager().canTrade(id, shopId, tradeKey)) {
-                            plugin.getTradeDataManager().recordTrade(id, shopId, tradeKey);
-                            successes.incrementAndGet();
-                        } else {
-                            blocks.incrementAndGet();
+                java.util.Random rng = new java.util.Random(Thread.currentThread().getId());
+                int virtualStart = workerIndex * virtualsPerWorker;
+                int virtualEnd = Math.min(players, virtualStart + virtualsPerWorker);
+                while (System.nanoTime() < deadlineNs && !Thread.currentThread().isInterrupted()) {
+                    for (int i = virtualStart; i < virtualEnd && System.nanoTime() < deadlineNs; i++) {
+                        java.util.UUID id = fakeIds.get(i);
+                        long t0 = System.nanoTime();
+                        try {
+                            plugin.getTradeDataManager().resetIfExpired(id, shopId, tradeKey);
+                            if (plugin.getTradeDataManager().canTrade(id, shopId, tradeKey)) {
+                                plugin.getTradeDataManager().recordTrade(id, shopId, tradeKey);
+                                successes.incrementAndGet();
+                            } else {
+                                blocks.incrementAndGet();
+                            }
+                        } catch (Throwable t) {
+                            long errs = errors.incrementAndGet();
+                            if (errs <= 5) firstErrors.add(t);
                         }
-                    } catch (Throwable t) {
-                        long errs = errors.incrementAndGet();
-                        if (errs <= 5) firstErrors.add(t);
+                        long latency = System.nanoTime() - t0;
+                        long idx = latencyIndex.getAndIncrement();
+                        if (idx < latencyCapacity) {
+                            latencyReservoir.set((int) idx, latency);
+                        } else if (rng.nextInt() % (int) Math.min(idx, Integer.MAX_VALUE) < latencyCapacity) {
+                            // Reservoir-style replacement so we keep a representative sample.
+                            latencyReservoir.set(rng.nextInt(latencyCapacity), latency);
+                        }
+                        ops.incrementAndGet();
+                        try {
+                            if (perOpSleepNanos > 0) {
+                                java.util.concurrent.locks.LockSupport.parkNanos(perOpSleepNanos);
+                            }
+                        } catch (Throwable ignored) { /* park can't throw, kept for symmetry */ }
                     }
-                    latenciesNs.add(System.nanoTime() - t0);
-                    ops.incrementAndGet();
                 }
             });
         }
@@ -671,8 +703,11 @@ public class StockControlCommand {
             try { pool.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS); }
             catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
 
-            // Percentiles from collected latencies
-            long[] arr = latenciesNs.stream().mapToLong(Long::longValue).sorted().toArray();
+            // Percentiles from the bounded latency reservoir.
+            int populated = (int) Math.min(latencyIndex.get(), latencyCapacity);
+            long[] arr = new long[populated];
+            for (int i = 0; i < populated; i++) arr[i] = latencyReservoir.get(i);
+            java.util.Arrays.sort(arr);
             long p50 = arr.length == 0 ? 0 : arr[arr.length / 2];
             long p99 = arr.length == 0 ? 0 : arr[Math.min(arr.length - 1, arr.length * 99 / 100)];
             long max = arr.length == 0 ? 0 : arr[arr.length - 1];
