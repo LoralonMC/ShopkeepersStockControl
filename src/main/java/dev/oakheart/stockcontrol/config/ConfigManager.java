@@ -448,6 +448,12 @@ public class ConfigManager {
                                      int uiSlot, int sourceSlot, int maxTrades, int cooldownSeconds,
                                      CooldownMode mode, String resetTime, String resetDay,
                                      int maxPerPlayer) {
+        // Trade keys are serialized CSV-style into pool_rotation_state.active_items; a comma in
+        // the key would corrupt the round-trip parse. Forbid it (and whitespace for general hygiene).
+        if (itemKey.contains(",")) {
+            errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId()
+                    + "': key must not contain a comma");
+        }
         if (maxTrades <= 0) {
             errors.add("Trade '" + itemKey + "': max-trades must be > 0");
         }

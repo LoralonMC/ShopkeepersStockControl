@@ -36,6 +36,11 @@ public class TradeDataManager {
     private final Map<String, GlobalTradeData> globalTradeCache;
     private final Set<String> globalDirtyKeys;
 
+    // Serializes destructive operations (resets, cleanup) against the batch-write flush.
+    // Without this, the flush can snapshot a cache entry, yield, and — after a concurrent reset
+    // wipes the cache + DB row — write the stale snapshot back, silently undoing the reset.
+    private final Object writeResetLock = new Object();
+
     // Scheduled tasks
     private BukkitTask batchWriteTask;
 
@@ -651,11 +656,13 @@ public class TradeDataManager {
      * Resets a specific player's specific trade.
      */
     public void resetPlayerTrade(UUID playerId, String shopId, String tradeKey) {
-        String cacheKey = buildCacheKey(playerId, shopId, tradeKey);
-        tradeCache.remove(cacheKey);
-        dirtyKeys.remove(cacheKey);
-        untrackCacheKey(playerId, cacheKey);
-        dataStore.deleteTradeData(playerId, shopId, tradeKey);
+        synchronized (writeResetLock) {
+            String cacheKey = buildCacheKey(playerId, shopId, tradeKey);
+            tradeCache.remove(cacheKey);
+            dirtyKeys.remove(cacheKey);
+            untrackCacheKey(playerId, cacheKey);
+            dataStore.deleteTradeData(playerId, shopId, tradeKey);
+        }
 
         plugin.getLogger().info("Reset trade " + tradeKey + " for player " + playerId + " in shop " + shopId);
     }
@@ -664,20 +671,21 @@ public class TradeDataManager {
      * Resets all trades for a specific player in a specific shop.
      */
     public void resetPlayerShopTrades(UUID playerId, String shopId) {
-        String prefix = playerId + ":" + shopId + ":";
-        Set<String> keys = playerCacheKeys.get(playerId);
-        if (keys != null) {
-            keys.removeIf(key -> {
-                if (key.startsWith(prefix)) {
-                    tradeCache.remove(key);
-                    dirtyKeys.remove(key);
-                    return true;
-                }
-                return false;
-            });
+        synchronized (writeResetLock) {
+            String prefix = playerId + ":" + shopId + ":";
+            Set<String> keys = playerCacheKeys.get(playerId);
+            if (keys != null) {
+                keys.removeIf(key -> {
+                    if (key.startsWith(prefix)) {
+                        tradeCache.remove(key);
+                        dirtyKeys.remove(key);
+                        return true;
+                    }
+                    return false;
+                });
+            }
+            dataStore.deletePlayerShopData(playerId, shopId);
         }
-
-        dataStore.deletePlayerShopData(playerId, shopId);
         plugin.getLogger().info("Reset all trades for player " + playerId + " in shop " + shopId);
     }
 
@@ -685,15 +693,16 @@ public class TradeDataManager {
      * Resets all trades for a specific player.
      */
     public void resetPlayerTrades(UUID playerId) {
-        Set<String> keys = playerCacheKeys.remove(playerId);
-        if (keys != null) {
-            for (String key : keys) {
-                tradeCache.remove(key);
-                dirtyKeys.remove(key);
+        synchronized (writeResetLock) {
+            Set<String> keys = playerCacheKeys.remove(playerId);
+            if (keys != null) {
+                for (String key : keys) {
+                    tradeCache.remove(key);
+                    dirtyKeys.remove(key);
+                }
             }
+            dataStore.deletePlayerData(playerId);
         }
-
-        dataStore.deletePlayerData(playerId);
         plugin.getLogger().info("Reset all trades for player " + playerId);
     }
 
@@ -702,25 +711,26 @@ public class TradeDataManager {
      * Resets global stock and all per-player purchase caps for this trade.
      */
     public void resetGlobalTrade(String shopId, String tradeKey) {
-        String cacheKey = shopId + ":" + tradeKey;
-        globalTradeCache.remove(cacheKey);
-        globalDirtyKeys.remove(cacheKey);
-        dataStore.deleteGlobalTradeData(shopId, tradeKey);
+        synchronized (writeResetLock) {
+            String cacheKey = shopId + ":" + tradeKey;
+            globalTradeCache.remove(cacheKey);
+            globalDirtyKeys.remove(cacheKey);
+            dataStore.deleteGlobalTradeData(shopId, tradeKey);
 
-        // Evict per-player caps from cache for this trade
-        tradeCache.entrySet().removeIf(e -> {
-            PlayerTradeData data = e.getValue();
-            if (data.getShopId().equals(shopId) && data.getTradeKey().equals(tradeKey)) {
-                dirtyKeys.remove(e.getKey());
-                untrackCacheKey(data.getPlayerId(), e.getKey());
-                return true;
-            }
-            return false;
-        });
+            // Evict per-player caps from cache for this trade
+            tradeCache.entrySet().removeIf(e -> {
+                PlayerTradeData data = e.getValue();
+                if (data.getShopId().equals(shopId) && data.getTradeKey().equals(tradeKey)) {
+                    dirtyKeys.remove(e.getKey());
+                    untrackCacheKey(data.getPlayerId(), e.getKey());
+                    return true;
+                }
+                return false;
+            });
 
-        // Single-query delete of all player entries for this shop+trade
-        dataStore.deleteShopTradeData(shopId, tradeKey);
-
+            // Single-query delete of all player entries for this shop+trade
+            dataStore.deleteShopTradeData(shopId, tradeKey);
+        }
         plugin.getLogger().info("Restocked trade " + tradeKey + " in shop " + shopId);
     }
 
@@ -729,14 +739,15 @@ public class TradeDataManager {
      * Resets global stock and all per-player purchase caps.
      */
     public void resetGlobalShop(String shopId) {
-        globalTradeCache.entrySet().removeIf(e -> e.getValue().getShopId().equals(shopId));
-        globalDirtyKeys.removeIf(key -> key.startsWith(shopId + ":"));
-        dataStore.deleteGlobalShopData(shopId);
+        synchronized (writeResetLock) {
+            globalTradeCache.entrySet().removeIf(e -> e.getValue().getShopId().equals(shopId));
+            globalDirtyKeys.removeIf(key -> key.startsWith(shopId + ":"));
+            dataStore.deleteGlobalShopData(shopId);
 
-        // Also reset per-player caps for this shop
-        evictShopPlayerData(shopId);
-        dataStore.deleteShopData(shopId);
-
+            // Also reset per-player caps for this shop
+            evictShopPlayerData(shopId);
+            dataStore.deleteShopData(shopId);
+        }
         plugin.getLogger().info("Restocked all trades in shop " + shopId);
     }
 
@@ -862,57 +873,58 @@ public class TradeDataManager {
      * Skips NONE mode entries (they never expire).
      */
     public int cleanupExpiredCooldowns() {
-        int cleaned = 0;
+        int cleaned;
+        synchronized (writeResetLock) {
+            // Clean up per-player entries
+            List<String> toRemove = new ArrayList<>();
+            Map<String, Long> resetTimeCache = new HashMap<>();
 
-        // Clean up per-player entries
-        List<String> toRemove = new ArrayList<>();
-        Map<String, Long> resetTimeCache = new HashMap<>();
+            for (Map.Entry<String, PlayerTradeData> entry : tradeCache.entrySet()) {
+                PlayerTradeData data = entry.getValue();
+                if (data.getTradesUsed() <= 0) continue;
 
-        for (Map.Entry<String, PlayerTradeData> entry : tradeCache.entrySet()) {
-            PlayerTradeData data = entry.getValue();
-            if (data.getTradesUsed() <= 0) continue;
+                TradeConfig tradeConfig = getTradeConfig(data.getShopId(), data.getTradeKey());
+                if (tradeConfig != null && tradeConfig.getCooldownMode() == CooldownMode.NONE) continue;
 
-            TradeConfig tradeConfig = getTradeConfig(data.getShopId(), data.getTradeKey());
-            if (tradeConfig != null && tradeConfig.getCooldownMode() == CooldownMode.NONE) continue;
-
-            if (isExpiredCached(data, tradeConfig, resetTimeCache)) {
-                toRemove.add(entry.getKey());
+                if (isExpiredCached(data, tradeConfig, resetTimeCache)) {
+                    toRemove.add(entry.getKey());
+                }
             }
-        }
 
-        for (String key : toRemove) {
-            PlayerTradeData data = tradeCache.remove(key);
-            dirtyKeys.remove(key);
-            if (data != null) {
-                untrackCacheKey(data.getPlayerId(), key);
-                // Delete from DB so the row doesn't get reloaded and re-detected as expired next tick.
-                dataStore.deleteTradeData(data.getPlayerId(), data.getShopId(), data.getTradeKey());
+            for (String key : toRemove) {
+                PlayerTradeData data = tradeCache.remove(key);
+                dirtyKeys.remove(key);
+                if (data != null) {
+                    untrackCacheKey(data.getPlayerId(), key);
+                    // Delete from DB so the row doesn't get reloaded and re-detected as expired next tick.
+                    dataStore.deleteTradeData(data.getPlayerId(), data.getShopId(), data.getTradeKey());
+                }
             }
-        }
-        cleaned += toRemove.size();
+            cleaned = toRemove.size();
 
-        // Clean up expired global entries
-        List<String> globalToRemove = new ArrayList<>();
-        for (Map.Entry<String, GlobalTradeData> entry : globalTradeCache.entrySet()) {
-            GlobalTradeData data = entry.getValue();
-            if (data.getTradesUsed() <= 0) continue;
+            // Clean up expired global entries
+            List<String> globalToRemove = new ArrayList<>();
+            for (Map.Entry<String, GlobalTradeData> entry : globalTradeCache.entrySet()) {
+                GlobalTradeData data = entry.getValue();
+                if (data.getTradesUsed() <= 0) continue;
 
-            TradeConfig tradeConfig = getTradeConfig(data.getShopId(), data.getTradeKey());
-            if (tradeConfig != null && tradeConfig.getCooldownMode() == CooldownMode.NONE) continue;
+                TradeConfig tradeConfig = getTradeConfig(data.getShopId(), data.getTradeKey());
+                if (tradeConfig != null && tradeConfig.getCooldownMode() == CooldownMode.NONE) continue;
 
-            if (isGlobalExpired(data, tradeConfig)) {
-                globalToRemove.add(entry.getKey());
+                if (isGlobalExpired(data, tradeConfig)) {
+                    globalToRemove.add(entry.getKey());
+                }
             }
-        }
 
-        for (String key : globalToRemove) {
-            GlobalTradeData data = globalTradeCache.remove(key);
-            globalDirtyKeys.remove(key);
-            if (data != null) {
-                dataStore.deleteGlobalTradeData(data.getShopId(), data.getTradeKey());
+            for (String key : globalToRemove) {
+                GlobalTradeData data = globalTradeCache.remove(key);
+                globalDirtyKeys.remove(key);
+                if (data != null) {
+                    dataStore.deleteGlobalTradeData(data.getShopId(), data.getTradeKey());
+                }
             }
+            cleaned += globalToRemove.size();
         }
-        cleaned += globalToRemove.size();
 
         if (plugin.getConfigManager().isDebugMode() && cleaned > 0) {
             plugin.getLogger().info("Cleaned up " + cleaned + " expired cooldown entries from cache");
@@ -985,37 +997,41 @@ public class TradeDataManager {
      * Flushes dirty data to database asynchronously.
      */
     private void flushDirtyData() {
-        // Flush per-player data
-        if (!dirtyKeys.isEmpty()) {
-            List<PlayerTradeData> dataToSave = new ArrayList<>();
-            Iterator<String> it = dirtyKeys.iterator();
-            while (it.hasNext()) {
-                String key = it.next();
-                it.remove();
-                PlayerTradeData data = tradeCache.get(key);
-                if (data != null) {
-                    dataToSave.add(data);
+        // Serialize against reset/cleanup so a concurrent wipe can't be silently re-inserted
+        // by a snapshot taken just before the wipe happened.
+        synchronized (writeResetLock) {
+            // Flush per-player data
+            if (!dirtyKeys.isEmpty()) {
+                List<PlayerTradeData> dataToSave = new ArrayList<>();
+                Iterator<String> it = dirtyKeys.iterator();
+                while (it.hasNext()) {
+                    String key = it.next();
+                    it.remove();
+                    PlayerTradeData data = tradeCache.get(key);
+                    if (data != null) {
+                        dataToSave.add(data);
+                    }
+                }
+                if (!dataToSave.isEmpty()) {
+                    dataStore.batchSaveTradeData(dataToSave);
                 }
             }
-            if (!dataToSave.isEmpty()) {
-                dataStore.batchSaveTradeData(dataToSave);
-            }
-        }
 
-        // Flush global data
-        if (!globalDirtyKeys.isEmpty()) {
-            List<GlobalTradeData> globalToSave = new ArrayList<>();
-            Iterator<String> git = globalDirtyKeys.iterator();
-            while (git.hasNext()) {
-                String key = git.next();
-                git.remove();
-                GlobalTradeData data = globalTradeCache.get(key);
-                if (data != null) {
-                    globalToSave.add(data);
+            // Flush global data
+            if (!globalDirtyKeys.isEmpty()) {
+                List<GlobalTradeData> globalToSave = new ArrayList<>();
+                Iterator<String> git = globalDirtyKeys.iterator();
+                while (git.hasNext()) {
+                    String key = git.next();
+                    git.remove();
+                    GlobalTradeData data = globalTradeCache.get(key);
+                    if (data != null) {
+                        globalToSave.add(data);
+                    }
                 }
-            }
-            if (!globalToSave.isEmpty()) {
-                dataStore.batchSaveGlobalTradeData(globalToSave);
+                if (!globalToSave.isEmpty()) {
+                    dataStore.batchSaveGlobalTradeData(globalToSave);
+                }
             }
         }
     }
@@ -1024,21 +1040,23 @@ public class TradeDataManager {
      * Flushes a specific player's dirty data.
      */
     public void flushPlayerData(UUID playerId) {
-        Set<String> keys = playerCacheKeys.get(playerId);
-        if (keys == null || keys.isEmpty()) return;
+        synchronized (writeResetLock) {
+            Set<String> keys = playerCacheKeys.get(playerId);
+            if (keys == null || keys.isEmpty()) return;
 
-        List<PlayerTradeData> dataToSave = new ArrayList<>();
-        for (String key : keys) {
-            if (dirtyKeys.remove(key)) {
-                PlayerTradeData data = tradeCache.get(key);
-                if (data != null) {
-                    dataToSave.add(data);
+            List<PlayerTradeData> dataToSave = new ArrayList<>();
+            for (String key : keys) {
+                if (dirtyKeys.remove(key)) {
+                    PlayerTradeData data = tradeCache.get(key);
+                    if (data != null) {
+                        dataToSave.add(data);
+                    }
                 }
             }
-        }
 
-        if (!dataToSave.isEmpty()) {
-            dataStore.batchSaveTradeData(dataToSave);
+            if (!dataToSave.isEmpty()) {
+                dataStore.batchSaveTradeData(dataToSave);
+            }
         }
     }
 

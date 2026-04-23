@@ -396,6 +396,27 @@ public class StockControlCommand {
                     Placeholder.unparsed("key", trade.getTradeKey()),
                     Placeholder.unparsed("details", details.toString()));
         }
+
+        if (shop.hasPools()) {
+            messageManager.sendCommand(sender, "info-pools-count",
+                    Placeholder.unparsed("count", String.valueOf(shop.getPools().size())));
+            for (PoolConfig pool : shop.getPools().values()) {
+                String poolDetails = "ui-slots " + pool.getUiSlots()
+                        + ", visible " + pool.getVisible()
+                        + ", mode " + pool.getMode().name().toLowerCase()
+                        + ", schedule " + pool.getSchedule().name().toLowerCase();
+                messageManager.sendCommand(sender, "info-pool-entry",
+                        Placeholder.unparsed("pool", pool.getName()),
+                        Placeholder.unparsed("details", poolDetails));
+                for (PoolItemConfig item : pool.getItems().values()) {
+                    String itemDetails = "source " + item.getSourceSlot()
+                            + ", max " + item.getMaxTrades();
+                    messageManager.sendCommand(sender, "info-pool-item-entry",
+                            Placeholder.unparsed("key", item.getItemKey()),
+                            Placeholder.unparsed("details", itemDetails));
+                }
+            }
+        }
     }
 
     // ===== Rotation =====

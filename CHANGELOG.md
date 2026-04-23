@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Periodic cooldown cleanup now deletes expired entries from the database instead of only evicting them from the cache, so the same row no longer gets rediscovered and re-logged every minute
+- Serialize trade-data resets and batch writes. Without this, the async batch-write task could snapshot a stock counter just before a concurrent reset wiped the row, then write the stale value back and silently undo the reset
+- Reject trade keys and pool item keys that contain a comma, since rotation state is persisted as a comma-separated list of active items and a key containing a comma would corrupt the round-trip parse
+- `/ssc info <shop>` now lists rotation pools and their items alongside static trades
 
 ## [1.3.0] - 2026-02-21
 
