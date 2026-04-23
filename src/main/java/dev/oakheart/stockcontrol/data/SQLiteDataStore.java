@@ -388,7 +388,11 @@ public class SQLiteDataStore implements DataStore {
         try {
             deletePlayerStmt.setString(1, playerId.toString());
             int deleted = deletePlayerStmt.executeUpdate();
-            plugin.getLogger().info("Deleted " + deleted + " trade entries for player " + playerId);
+            // Only log actual deletes — no-op deletes (e.g. stress cleanup for players that
+            // never had any recorded trades) would otherwise spam one line per call.
+            if (deleted > 0) {
+                plugin.getLogger().info("Deleted " + deleted + " trade entries for player " + playerId);
+            }
         } catch (SQLException e) {
             plugin.getLogger().log(Level.SEVERE, "Error deleting player data", e);
         }

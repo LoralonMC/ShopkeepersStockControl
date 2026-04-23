@@ -707,6 +707,28 @@ public class TradeDataManager {
     }
 
     /**
+     * Batched reset that evicts cache + deletes DB rows for many players under a single lock
+     * acquisition and emits a single summary log line. Used by the stress-test cleanup so
+     * it doesn't spam one log line per fake player.
+     */
+    public void resetPlayersBulk(java.util.Collection<UUID> playerIds) {
+        if (playerIds.isEmpty()) return;
+        synchronized (writeResetLock) {
+            for (UUID playerId : playerIds) {
+                Set<String> keys = playerCacheKeys.remove(playerId);
+                if (keys != null) {
+                    for (String key : keys) {
+                        tradeCache.remove(key);
+                        dirtyKeys.remove(key);
+                    }
+                }
+                dataStore.deletePlayerData(playerId);
+            }
+        }
+        plugin.getLogger().info("Bulk reset: cleared trade data for " + playerIds.size() + " player(s)");
+    }
+
+    /**
      * Restocks a specific trade in a shared-mode shop.
      * Resets global stock and all per-player purchase caps for this trade.
      */

@@ -708,12 +708,9 @@ public class StockControlCommand {
             long p99 = arr.length == 0 ? 0 : arr[Math.min(arr.length - 1, arr.length * 99 / 100)];
             long max = arr.length == 0 ? 0 : arr[arr.length - 1];
 
-            // Clean up: resetPlayerTrades evicts cache + deletes DB rows atomically, so the
-            // batch flush can't re-upsert fake-player data later. Uses the writeResetLock
-            // we just added.
-            for (java.util.UUID id : fakeIds) {
-                plugin.getTradeDataManager().resetPlayerTrades(id);
-            }
+            // Clean up: bulk reset under a single lock acquisition, one summary log line
+            // instead of one line per fake player.
+            plugin.getTradeDataManager().resetPlayersBulk(fakeIds);
 
             org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
                 java.util.List<String> result = new java.util.ArrayList<>();
