@@ -1,16 +1,22 @@
 package dev.oakheart.stockcontrol.data;
 
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Represents a player's trade data for a specific trade in a specific shop.
  * This class tracks how many times a player has used a trade and when their cooldown started.
+ *
+ * <p>{@code tradesUsed} is an {@link AtomicInteger} so concurrent {@code incrementTradesUsed()}
+ * calls compose without lost updates. Real production trades always fire on the main thread,
+ * but this guards against accidental concurrent mutation from admin commands, Folia support,
+ * or other async paths.</p>
  */
 public class PlayerTradeData {
     private final UUID playerId;
     private final String shopId;
     private final String tradeKey;         // Stable identifier (e.g., "diamond_trade")
-    private volatile int tradesUsed;
+    private final AtomicInteger tradesUsed;
     private volatile long lastResetEpoch;           // Timestamp when cooldown started (limit reached)
     private volatile int cooldownSeconds;           // Cooldown duration from config
 
@@ -29,7 +35,7 @@ public class PlayerTradeData {
         this.playerId = playerId;
         this.shopId = shopId;
         this.tradeKey = tradeKey;
-        this.tradesUsed = tradesUsed;
+        this.tradesUsed = new AtomicInteger(tradesUsed);
         this.lastResetEpoch = lastResetEpoch;
         this.cooldownSeconds = cooldownSeconds;
     }
@@ -48,7 +54,16 @@ public class PlayerTradeData {
     }
 
     public int getTradesUsed() {
-        return tradesUsed;
+        return tradesUsed.get();
+    }
+
+    /**
+     * Atomically increments trades used and returns the new value. Use this in preference to
+     * {@code setTradesUsed(getTradesUsed() + 1)} — the latter has a read-modify-write race
+     * under concurrent mutation that can lose updates.
+     */
+    public int incrementTradesUsed() {
+        return tradesUsed.incrementAndGet();
     }
 
     public long getLastResetEpoch() {
@@ -61,7 +76,7 @@ public class PlayerTradeData {
 
     // Setters
     public void setTradesUsed(int tradesUsed) {
-        this.tradesUsed = tradesUsed;
+        this.tradesUsed.set(tradesUsed);
     }
 
     public void setLastResetEpoch(long lastResetEpoch) {
@@ -86,7 +101,7 @@ public class PlayerTradeData {
                 "playerId=" + playerId +
                 ", shopId='" + shopId + '\'' +
                 ", tradeKey='" + tradeKey + '\'' +
-                ", tradesUsed=" + tradesUsed +
+                ", tradesUsed=" + tradesUsed.get() +
                 ", lastResetEpoch=" + lastResetEpoch +
                 ", cooldownSeconds=" + cooldownSeconds +
                 '}';

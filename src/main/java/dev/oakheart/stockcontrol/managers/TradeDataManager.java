@@ -363,14 +363,14 @@ public class TradeDataManager {
 
         PlayerTradeData data = getOrCreateTradeData(playerId, shopId, tradeKey);
 
-        // Increment usage
-        data.setTradesUsed(data.getTradesUsed() + 1);
+        // Atomic increment — safe even if this were ever called from multiple threads.
+        int newUsed = data.incrementTradesUsed();
         markDirty(data.getCacheKey());
 
         if (plugin.getConfigManager().isDebugMode()) {
             int limit = getTradeLimit(shopId, tradeKey);
             plugin.getLogger().info("Recorded trade for " + playerId + " at " + shopId + ":" + tradeKey +
-                    " (used: " + data.getTradesUsed() + "/" + limit + ")");
+                    " (used: " + newUsed + "/" + limit + ")");
         }
     }
 
@@ -379,22 +379,22 @@ public class TradeDataManager {
      * Increments both the global counter and per-player counter (if per-player cap exists).
      */
     private void recordSharedTrade(UUID playerId, String shopId, String tradeKey, ShopConfig shopConfig) {
-        // Increment global counter
+        // Atomic increments — prevents lost updates if recordTrade is ever called concurrently.
         GlobalTradeData globalData = getOrCreateGlobalTradeData(shopId, tradeKey);
-        globalData.setTradesUsed(globalData.getTradesUsed() + 1);
+        int newGlobalUsed = globalData.incrementTradesUsed();
         globalDirtyKeys.add(globalData.getCacheKey());
 
         // Increment per-player counter if per-player cap is configured
         TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig != null && tradeConfig.getMaxPerPlayer() > 0) {
             PlayerTradeData playerData = getOrCreateTradeData(playerId, shopId, tradeKey);
-            playerData.setTradesUsed(playerData.getTradesUsed() + 1);
+            playerData.incrementTradesUsed();
             markDirty(playerData.getCacheKey());
         }
 
         if (plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info("Recorded shared trade for " + playerId + " at " + shopId + ":" + tradeKey +
-                    " (global used: " + globalData.getTradesUsed() + "/" + getTradeLimit(shopId, tradeKey) + ")");
+                    " (global used: " + newGlobalUsed + "/" + getTradeLimit(shopId, tradeKey) + ")");
         }
     }
 

@@ -1,13 +1,20 @@
 package dev.oakheart.stockcontrol.data;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * Represents global trade stock data for a shared-mode shop.
  * Tracks the combined stock pool that all players draw from.
+ *
+ * <p>{@code tradesUsed} is an {@link AtomicInteger} so concurrent
+ * {@code incrementTradesUsed()} calls compose without lost updates. Real production
+ * trades always fire on the main thread, but this guards against accidental concurrent
+ * mutation from admin commands, Folia support, or other async paths.</p>
  */
 public class GlobalTradeData {
     private final String shopId;
     private final String tradeKey;
-    private volatile int tradesUsed;
+    private final AtomicInteger tradesUsed;
     private volatile long lastResetEpoch;
     private volatile int cooldownSeconds;
 
@@ -15,7 +22,7 @@ public class GlobalTradeData {
                            int tradesUsed, long lastResetEpoch, int cooldownSeconds) {
         this.shopId = shopId;
         this.tradeKey = tradeKey;
-        this.tradesUsed = tradesUsed;
+        this.tradesUsed = new AtomicInteger(tradesUsed);
         this.lastResetEpoch = lastResetEpoch;
         this.cooldownSeconds = cooldownSeconds;
     }
@@ -29,7 +36,16 @@ public class GlobalTradeData {
     }
 
     public int getTradesUsed() {
-        return tradesUsed;
+        return tradesUsed.get();
+    }
+
+    /**
+     * Atomically increments trades used and returns the new value. Use this in preference to
+     * {@code setTradesUsed(getTradesUsed() + 1)} — the latter has a read-modify-write race
+     * under concurrent mutation that can lose updates.
+     */
+    public int incrementTradesUsed() {
+        return tradesUsed.incrementAndGet();
     }
 
     public long getLastResetEpoch() {
@@ -41,7 +57,7 @@ public class GlobalTradeData {
     }
 
     public void setTradesUsed(int tradesUsed) {
-        this.tradesUsed = tradesUsed;
+        this.tradesUsed.set(tradesUsed);
     }
 
     public void setLastResetEpoch(long lastResetEpoch) {
@@ -65,7 +81,7 @@ public class GlobalTradeData {
         return "GlobalTradeData{" +
                 "shopId='" + shopId + '\'' +
                 ", tradeKey='" + tradeKey + '\'' +
-                ", tradesUsed=" + tradesUsed +
+                ", tradesUsed=" + tradesUsed.get() +
                 ", lastResetEpoch=" + lastResetEpoch +
                 ", cooldownSeconds=" + cooldownSeconds +
                 '}';
