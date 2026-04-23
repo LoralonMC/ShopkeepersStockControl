@@ -158,6 +158,18 @@ public class PoolRotationManager {
     }
 
     /**
+     * Returns a flat view of every currently-stored rotation state across all shops.
+     * Intended for diagnostic commands; do not mutate.
+     */
+    public List<RotationState> allStates() {
+        List<RotationState> all = new java.util.ArrayList<>();
+        for (Map<String, RotationState> perShop : states.values()) {
+            all.addAll(perShop.values());
+        }
+        return all;
+    }
+
+    /**
      * Forces an advance for every pool of the given shop, or one specific pool when poolName
      * is non-null. Counters are wiped the same as a natural boundary crossing.
      *

@@ -184,4 +184,13 @@ public interface DataStore {
      * @return true if operational, false otherwise
      */
     boolean isOperational();
+
+    /**
+     * Returns total row counts for each table. Used by the diagnostic command. Not on a hot path.
+     *
+     * @return Record containing row counts, or null if the store isn't operational
+     */
+    TableCounts countRows();
+
+    record TableCounts(long playerTrades, long globalTrades, long rotationStates) {}
 }

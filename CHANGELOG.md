@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject trade keys and pool item keys that contain a comma, since rotation state is persisted as a comma-separated list of active items and a key containing a comma would corrupt the round-trip parse
 - `/ssc info <shop>` now lists rotation pools and their items alongside static trades
 
+### Added
+
+- `/ssc diag` — admin diagnostic command that dumps cache sizes, pending-queue depths, DB row counts, and current rotation states
+- `/ssc stress <shop> <trade> <players> <duration>` — admin stress test that spawns N concurrent virtual players hammering a trade (optionally with rotation forces interleaved) and reports ops/sec, p50/p99 latency, and any exceptions caught. Cleans up its fake-player data afterward. Run on staging or during maintenance; writes to the live DB briefly.
+- New permission `shopkeepersstock.admin` gates both of the above
+
 ## [1.3.0] - 2026-02-21
 
 ### Added

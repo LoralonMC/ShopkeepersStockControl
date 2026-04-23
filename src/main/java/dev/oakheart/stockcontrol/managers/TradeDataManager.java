@@ -1189,6 +1189,28 @@ public class TradeDataManager {
         return trade == null ? 86400 : trade.getCooldownSeconds();
     }
 
+    // ===== Diagnostics =====
+
+    public int cacheSize() {
+        return tradeCache.size();
+    }
+
+    public int globalCacheSize() {
+        return globalTradeCache.size();
+    }
+
+    public int dirtyCount() {
+        return dirtyKeys.size();
+    }
+
+    public int globalDirtyCount() {
+        return globalDirtyKeys.size();
+    }
+
+    public int trackedPlayerCount() {
+        return playerCacheKeys.size();
+    }
+
     // ===== Cache Key Helpers =====
 
     private void markDirty(String cacheKey) {

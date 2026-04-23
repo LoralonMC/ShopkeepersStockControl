@@ -638,6 +638,26 @@ public class SQLiteDataStore implements DataStore {
     }
 
     @Override
+    public synchronized TableCounts countRows() {
+        if (!operational) return new TableCounts(0, 0, 0);
+        try (Statement stmt = connection.createStatement()) {
+            long playerTrades = scalarCount(stmt, "SELECT COUNT(*) FROM player_trades");
+            long globalTrades = scalarCount(stmt, "SELECT COUNT(*) FROM global_trades");
+            long rotationStates = scalarCount(stmt, "SELECT COUNT(*) FROM pool_rotation_state");
+            return new TableCounts(playerTrades, globalTrades, rotationStates);
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.WARNING, "Error counting rows", e);
+            return new TableCounts(-1, -1, -1);
+        }
+    }
+
+    private static long scalarCount(Statement stmt, String sql) throws SQLException {
+        try (ResultSet rs = stmt.executeQuery(sql)) {
+            return rs.next() ? rs.getLong(1) : 0L;
+        }
+    }
+
+    @Override
     public synchronized void close() {
         try {
             // Close prepared statements

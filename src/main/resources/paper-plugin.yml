@@ -30,6 +30,7 @@ permissions:
       shopkeepersstock.debug: true
       shopkeepersstock.cleanup: true
       shopkeepersstock.rotation: true
+      shopkeepersstock.admin: true
       shopkeepersstock.help: true
   shopkeepersstock.reload:
     description: 'Reload configuration'
@@ -54,6 +55,9 @@ permissions:
     default: op
   shopkeepersstock.rotation:
     description: 'View and force rotation pool advances'
+    default: op
+  shopkeepersstock.admin:
+    description: 'Admin diagnostics and stress testing (/ssc diag, /ssc stress)'
     default: op
   shopkeepersstock.help:
     description: 'View command help'

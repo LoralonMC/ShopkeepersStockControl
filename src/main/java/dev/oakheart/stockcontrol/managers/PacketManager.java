@@ -354,6 +354,32 @@ public class PacketManager {
 
     private record PoolSlotAssignment(PoolConfig pool, String itemKey) {}
 
+    // ===== Diagnostics =====
+
+    public int openShopCount() {
+        return playerShopCache.size();
+    }
+
+    public int cachedMerchantDataCount() {
+        return playerMerchantData.size();
+    }
+
+    public int pendingCacheCount() {
+        return pendingCache.size();
+    }
+
+    public int pendingStockPushCount() {
+        return pendingStockPushes.size();
+    }
+
+    public int pendingRotationPushCount() {
+        return pendingRotationPushes.size();
+    }
+
+    public int uiToSourceMapCount() {
+        return uiToSourceMaps.size();
+    }
+
     // ===== Shared Stock Live Updates =====
 
     /**
