@@ -534,45 +534,39 @@ public class StockControlCommand {
         dev.oakheart.stockcontrol.data.DataStore.TableCounts rows = plugin.getDataStore().countRows();
         long now = java.time.ZonedDateTime.now().toEpochSecond();
 
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#6B7A5E>=== Diagnostics: " + plugin.getPluginMeta().getName()
-                        + " v" + plugin.getPluginMeta().getVersion() + " ==="));
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>Shops: <#FCD472>" + shopsCount + "<#f2ebd7> ("
-                        + "<#FCD472>" + pooledCount + "<#f2ebd7> with pools)"));
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>Trade cache: <#FCD472>" + tdm.cacheSize() + "<#f2ebd7> entries, "
-                        + "dirty <#FCD472>" + tdm.dirtyCount() + "<#f2ebd7>, "
-                        + "tracked players <#FCD472>" + tdm.trackedPlayerCount()));
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>Global cache: <#FCD472>" + tdm.globalCacheSize() + "<#f2ebd7> entries, "
-                        + "dirty <#FCD472>" + tdm.globalDirtyCount()));
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>Open shops: <#FCD472>" + pm.openShopCount()
-                        + "<#f2ebd7>, cached merchants <#FCD472>" + pm.cachedMerchantDataCount()
-                        + "<#f2ebd7>, ui-maps <#FCD472>" + pm.uiToSourceMapCount()));
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>Pending: cache <#FCD472>" + pm.pendingCacheCount()
-                        + "<#f2ebd7>, stock-push <#FCD472>" + pm.pendingStockPushCount()
-                        + "<#f2ebd7>, rotation-push <#FCD472>" + pm.pendingRotationPushCount()));
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>DB rows: player_trades <#FCD472>" + rows.playerTrades()
-                        + "<#f2ebd7>, global_trades <#FCD472>" + rows.globalTrades()
-                        + "<#f2ebd7>, pool_rotation_state <#FCD472>" + rows.rotationStates()));
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        lines.add("=== Diagnostics: " + plugin.getPluginMeta().getName()
+                + " v" + plugin.getPluginMeta().getVersion() + " ===");
+        lines.add("Shops: " + shopsCount + " (" + pooledCount + " with pools)");
+        lines.add("Trade cache: " + tdm.cacheSize() + " entries, dirty " + tdm.dirtyCount()
+                + ", tracked players " + tdm.trackedPlayerCount());
+        lines.add("Global cache: " + tdm.globalCacheSize() + " entries, dirty " + tdm.globalDirtyCount());
+        lines.add("Open shops: " + pm.openShopCount()
+                + ", cached merchants " + pm.cachedMerchantDataCount()
+                + ", ui-maps " + pm.uiToSourceMapCount());
+        lines.add("Pending: cache " + pm.pendingCacheCount()
+                + ", stock-push " + pm.pendingStockPushCount()
+                + ", rotation-push " + pm.pendingRotationPushCount());
+        lines.add("DB rows: player_trades " + rows.playerTrades()
+                + ", global_trades " + rows.globalTrades()
+                + ", pool_rotation_state " + rows.rotationStates());
 
         java.util.List<dev.oakheart.stockcontrol.data.RotationState> states = prm.allStates();
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#f2ebd7>Rotation states: <#FCD472>" + states.size()));
+        lines.add("Rotation states: " + states.size());
         for (dev.oakheart.stockcontrol.data.RotationState s : states) {
             long until = Math.max(0, s.getAdvancesAt() - now);
             String shortShop = s.getShopId().length() > 8
                     ? s.getShopId().substring(0, 8) + "…" : s.getShopId();
-            sender.sendMessage(MINI_MESSAGE.deserialize(
-                    "<#6C757D>  - <#FCD472>" + shortShop + "<#6C757D>/<#FCD472>" + s.getPoolName()
-                            + "<#6C757D> period <#FCD472>" + s.getPeriodIndex()
-                            + "<#6C757D>, next in <#FCD472>"
-                            + plugin.getTradeDataManager().formatDuration(until)
-                            + "<#6C757D>, active <#FCD472>" + s.getActiveItems()));
+            lines.add("  - " + shortShop + "/" + s.getPoolName()
+                    + " period " + s.getPeriodIndex()
+                    + ", next in " + plugin.getTradeDataManager().formatDuration(until)
+                    + ", active " + s.getActiveItems());
+        }
+
+        // Echo to both the issuer and the server console so the output is easy to copy out.
+        for (String line : lines) {
+            sender.sendMessage(MINI_MESSAGE.deserialize("<#f2ebd7>" + line));
+            plugin.getLogger().info(line);
         }
     }
 
@@ -615,13 +609,15 @@ public class StockControlCommand {
         final int virtualsPerWorker = (players + workerCount - 1) / workerCount;
         final long perOpSleepNanos = 20_000_000L / Math.max(1, virtualsPerWorker);
 
-        sender.sendMessage(MINI_MESSAGE.deserialize(
-                "<#D89B6A>[stress] " + players + " virtual players × " + durationSec + "s on "
-                        + shop.getName() + ":" + tradeKey
-                        + (hasPools ? " (rotation force every 5s)" : "")
-                        + " | " + workerCount + " worker threads, ~50 ops/s per player"));
+        String startLine = "[stress] " + players + " virtual players × " + durationSec + "s on "
+                + shop.getName() + ":" + tradeKey
+                + (hasPools ? " (rotation force every 5s)" : "")
+                + " | " + workerCount + " worker threads, ~50 ops/s per player";
+        sender.sendMessage(MINI_MESSAGE.deserialize("<#D89B6A>" + startLine));
         sender.sendMessage(MINI_MESSAGE.deserialize(
                 "<#C27B6B>[stress] Writes to live DB. Cleanup runs at end."));
+        plugin.getLogger().info(startLine);
+        plugin.getLogger().info("[stress] Writes to live DB. Cleanup runs at end.");
 
         // Stable UUID prefix so we can identify and delete stress data after.
         final java.util.List<java.util.UUID> fakeIds = new java.util.ArrayList<>(players);
@@ -720,30 +716,29 @@ public class StockControlCommand {
             }
 
             org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
-                sender.sendMessage(MINI_MESSAGE.deserialize(
-                        "<#6B7A5E>=== Stress result ==="));
-                sender.sendMessage(MINI_MESSAGE.deserialize(
-                        "<#f2ebd7>Total ops: <#FCD472>" + ops.get()
-                                + "<#f2ebd7> (<#FCD472>" + (ops.get() / Math.max(1, durationSec))
-                                + "<#f2ebd7>/s)"));
-                sender.sendMessage(MINI_MESSAGE.deserialize(
-                        "<#f2ebd7>Success: <#8FAA87>" + successes.get()
-                                + "<#f2ebd7>  Blocked: <#D89B6A>" + blocks.get()
-                                + "<#f2ebd7>  Errors: "
-                                + (errors.get() == 0 ? "<#8FAA87>0" : "<#C27B6B>" + errors.get())));
-                sender.sendMessage(MINI_MESSAGE.deserialize(
-                        "<#f2ebd7>Latency µs: p50 <#FCD472>" + (p50 / 1000)
-                                + "<#f2ebd7>  p99 <#FCD472>" + (p99 / 1000)
-                                + "<#f2ebd7>  max <#FCD472>" + (max / 1000)));
+                java.util.List<String> result = new java.util.ArrayList<>();
+                result.add("=== Stress result ===");
+                result.add("Total ops: " + ops.get()
+                        + " (" + (ops.get() / Math.max(1, durationSec)) + "/s)");
+                result.add("Success: " + successes.get()
+                        + "  Blocked: " + blocks.get()
+                        + "  Errors: " + errors.get());
+                result.add("Latency µs: p50 " + (p50 / 1000)
+                        + "  p99 " + (p99 / 1000)
+                        + "  max " + (max / 1000));
                 if (!firstErrors.isEmpty()) {
-                    sender.sendMessage(MINI_MESSAGE.deserialize(
-                            "<#C27B6B>First error: " + firstErrors.get(0).getClass().getSimpleName()
-                                    + ": " + String.valueOf(firstErrors.get(0).getMessage())));
+                    Throwable first = firstErrors.get(0);
+                    result.add("First error: " + first.getClass().getSimpleName()
+                            + ": " + String.valueOf(first.getMessage()));
                     plugin.getLogger().log(java.util.logging.Level.WARNING,
-                            "Stress test recorded errors", firstErrors.get(0));
+                            "Stress test recorded errors", first);
                 }
-                sender.sendMessage(MINI_MESSAGE.deserialize(
-                        "<#6C757D>Stress data cleaned. Real data untouched."));
+                result.add("Stress data cleaned. Real data untouched.");
+
+                for (String line : result) {
+                    sender.sendMessage(MINI_MESSAGE.deserialize("<#f2ebd7>" + line));
+                    plugin.getLogger().info(line);
+                }
             });
         }, durationSec * 20L);
     }
