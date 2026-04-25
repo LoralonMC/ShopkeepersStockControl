@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'maven-publish'
     id("com.gradleup.shadow") version "9.3.1"
 }
 
@@ -80,3 +81,19 @@ shadowJar {
 }
 
 build.dependsOn shadowJar
+
+// Publish the un-shaded jar to mavenLocal so OakheartWeb can compileOnly against
+// the SSSC API (ShopkeepersStockControl, ConfigManager, PoolRotationManager, etc.).
+// The runtime plugin jar in plugins/ is the shadowJar; relocated namespaces don't
+// affect the dev.oakheart.stockcontrol.* classes consumers actually link against.
+publishing {
+    publications {
+        maven(MavenPublication) {
+            artifactId = 'shopkeepers-stock-control'
+            from components.java
+        }
+    }
+    repositories {
+        mavenLocal()
+    }
+}
