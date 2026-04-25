@@ -322,6 +322,15 @@ public class PacketManager {
     private void applyLimitsToOffer(Player player, ShopConfig shopConfig, String tradeKey,
                                     int maxTrades, int maxPerPlayer, MerchantOffer offer) {
         int remaining = tradeDataManager.getRemainingTrades(player.getUniqueId(), shopConfig.getShopId(), tradeKey);
+        boolean unlimited = maxTrades < 0 && !(shopConfig.isShared() && maxPerPlayer > 0);
+        if (unlimited) {
+            // Vanilla merchant offers can't represent "no cap", so we paint a high uses=0/max
+            // pair: the trade always shows in stock and the player isn't shown a counter that
+            // misrepresents the rotation-as-throttle design.
+            offer.setUses(0);
+            offer.setMaxUses(Integer.MAX_VALUE);
+            return;
+        }
         int displayMax = (shopConfig.isShared() && maxPerPlayer > 0) ? maxPerPlayer : maxTrades;
         int used = displayMax - remaining;
         offer.setUses(Math.max(0, used));

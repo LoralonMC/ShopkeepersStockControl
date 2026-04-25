@@ -65,21 +65,17 @@ public class ShopConfig {
         }
         this.tradesBySlot = Map.copyOf(slotMap);
 
-        // Unified key lookup — statics first, then each pool's items synthesized as TradeConfig
+        // Unified key lookup — statics first, then each pool's items synthesized as TradeConfig.
+        // For pools with subpools, items live inside each subpool — collect those too.
         Map<String, TradeConfig> merged = new HashMap<>(trades);
         for (PoolConfig pool : pools.values()) {
             for (PoolItemConfig item : pool.getItems().values()) {
-                merged.put(item.getItemKey(), new TradeConfig(
-                        item.getItemKey(),
-                        -1,                          // no fixed UI slot; lookups don't use this
-                        item.getSourceSlot(),
-                        item.getMaxTrades(),
-                        item.getCooldownSeconds(),
-                        item.getCooldownMode(),
-                        item.getResetTime(),
-                        item.getResetDay(),
-                        item.getMaxPerPlayer()
-                ));
+                mergePoolItem(merged, item);
+            }
+            for (dev.oakheart.stockcontrol.data.SubpoolConfig sub : pool.getSubpools().values()) {
+                for (PoolItemConfig item : sub.getItems().values()) {
+                    mergePoolItem(merged, item);
+                }
             }
         }
         this.allTradesByKey = Map.copyOf(merged);
@@ -104,6 +100,20 @@ public class ShopConfig {
                       Map<String, TradeConfig> trades) {
         this(shopId, name, enabled, cooldownMode, resetTime, resetDay,
                 stockMode, maxPerPlayer, trades, Collections.emptyMap());
+    }
+
+    private static void mergePoolItem(Map<String, TradeConfig> merged, PoolItemConfig item) {
+        merged.put(item.getItemKey(), new TradeConfig(
+                item.getItemKey(),
+                -1,                          // no fixed UI slot; lookups don't use this
+                item.getSourceSlot(),
+                item.getMaxTrades(),
+                item.getCooldownSeconds(),
+                item.getCooldownMode(),
+                item.getResetTime(),
+                item.getResetDay(),
+                item.getMaxPerPlayer()
+        ));
     }
 
     public String getShopId() {

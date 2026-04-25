@@ -8,6 +8,8 @@ public enum RotationSchedule {
     DAILY,
     /** Advances once per week at reset-time on reset-day. */
     WEEKLY,
+    /** Advances on the 1st of each month at reset-time. */
+    MONTHLY,
     /** Advances every N seconds (configured via 'every'), anchored to reset-time on today. */
     INTERVAL;
 

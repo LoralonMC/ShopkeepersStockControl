@@ -7,9 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bootstrap-friendly validation — pools with zero items (or subpools with zero items) now load successfully so the operator can declare pool/subpool structure in `trades.yml` *before* running `/ssc bulk add`. Previously empty pools were rejected, which created a chicken-and-egg setup problem. Pools with at least one item still enforce the "items >= visible" rule.
+- `/ssc bulk add` now falls back to the pool's default `price` when the named subpool isn't declared in `trades.yml` yet (the common bootstrap case). The output snippet is also now wrapped in a complete subpool YAML block (with the right indentation) so the operator can paste it directly under `pools.<pool>.subpools:`.
+- `/ssc bulk add` now writes the new subpool entries (item keys + source slots + max-trades) **directly into `trades.yml`** via the OakheartLib config wrapper (which preserves comments and formatting). Replaces the earlier "paste a snippet" workflow — the operator just runs the command and then `/ssc reload`. If a subpool's `visible` is already set, it's left alone so hand-tuned values aren't clobbered.
+
 ### Added
 
-- Rotation pools — shops can now declare named pools that cycle through a set of items on a daily, weekly, or interval schedule. Each pool owns UI slots and shows only `visible` items per period; non-active items are fully hidden. Selection is deterministic across restarts and server-wide.
+- `max-trades: -1` is now a valid "unlimited" sentinel — semantically "no per-period purchase cap." Use it for rotation-pool collectibles where the rotation itself is the throttle (one item appears per period; the player can buy as many as they want during that window). Validation still rejects `0` (typo guard — a zero cap would block every trade). Display surfaces (`/ssc info`, `/ssc check`, PlaceholderAPI `max`/`remaining`/`globalmax`) render unlimited as `∞`. The merchant offer is painted as `0/Integer.MAX_VALUE` so the trade always shows in stock.
+- Flow-style YAML lists (`ui-slots: [0, 1, 2]`) are now supported for read paths, fixing a silent parse failure where pools with flow-style `ui-slots` reported `ui-slots must list at least one UI position` after a config save. Requires the matching OakheartLib 1.1.1 update — block style still works.
+
+### Fixed
+
+- `/ssc bulk add` no longer fails when the target pool's `subpools` (or `items`) is declared as the flow-style empty placeholder `{}` — the wrapper now strips that placeholder and recreates it as an extensible block section before writing the new entries.
+- `/ssc bulk add` now writes `max-trades: -1` (unlimited) for new pool items instead of `0`. Existing `max-trades` values are preserved on re-runs so hand-tuned caps aren't clobbered.
+- Reload now re-picks a pool's active items when the cached list goes stale within the current period. Previously, if a pool was reloaded while empty (active list seeded as `[]`), then items were added via `/ssc bulk add` and the operator reloaded again, the active list stayed empty until the next scheduled boundary because the period index hadn't advanced. Reload now also re-picks when the cached size doesn't match `visible` or when any cached key is no longer a valid pool/subpool item — without wiping counters or burning a rotation tick.
+- `PoolConfig.getItem(key)` now searches subpool items in addition to the flat items list. Without this, the merchant UI rebuild silently dropped every rotation slot whose item lived in a subpool — the active item key was correct, but the resolver returned null and the UI fell through with no offer for that slot. Trade limits already merged subpool items into the shop-level lookup, so stock tracking was unaffected.
+
+### Added
+
+- Rotation pools — shops can now declare named pools that cycle through a set of items on a daily, weekly, monthly, or interval schedule. Each pool owns UI slots and shows only `visible` items per period; non-active items are fully hidden. Selection is deterministic across restarts and server-wide.
+- New `monthly` schedule for rotation pools — advances on the 1st of each month at `reset-time`. Period index uses calendar months so varied month lengths are handled correctly.
+- Subpools — pools can now declare named subpools (each with its own item list), and each rotation period spotlights exactly one subpool. Item selection happens within the active subpool only, producing themed rotations like "March is Dogs month" rather than random mixing across the entire pool. Each subpool can override the parent pool's `visible` count and `price`.
+- Per-pool `price` field — declares a default emerald (or other ItemStack) cost for items added via the bulk-add command. Subpools can override with their own `price`.
+- New command: `/ssc bulk add <shop> <pool> <subpool> <items-file>` — reads a YAML file of Nexo item IDs, resolves each via the Nexo API, and adds them as Shopkeepers `TradeOffer`s to the named admin shop using the pool's default price. Outputs a paste-ready `trades.yml` snippet showing the assigned source slots so the operator can drop it into the matching pool/subpool's `items:` section.
+- New command: `/ssc bulk clear <shop> <count>` — removes the trailing N offers from a Shopkeepers admin shop. Useful for re-running bulk-add cleanly when a pool's item list changes.
+- New permission: `shopkeepersstock.bulk` (op default).
+- New optional dependency: Nexo (only required when using bulk-add commands; runtime-checked).
 - Static trades can now split the UI slot a player sees from the Shopkeepers editor source slot via an optional `source:` field.
 - New command: `/ssc rotation peek <shop>` shows current active items and time-to-next for each pool.
 - New command: `/ssc rotation force <shop> [pool]` manually advances all pools (or one) in a shop for testing.

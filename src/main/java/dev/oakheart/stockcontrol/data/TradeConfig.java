@@ -68,6 +68,11 @@ public class TradeConfig {
         return maxTrades;
     }
 
+    /** A {@code max-trades} of {@code -1} means "no per-period cap" (unlimited). */
+    public boolean isUnlimited() {
+        return maxTrades < 0;
+    }
+
     public int getCooldownSeconds() {
         return cooldownSeconds;
     }

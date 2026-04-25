@@ -128,6 +128,13 @@ public class PoolRotationManager {
                 } else if (existing.getPeriodIndex() < expectedPeriod) {
                     // Boundary passed while we were offline — catch up.
                     advance(shop.getShopId(), pool, expectedPeriod, now);
+                } else if (isActiveListStale(pool, existing)) {
+                    // Period hasn't advanced, but the cached active list no longer reflects
+                    // what selectActive would pick now — typically because the operator added
+                    // items to a previously-empty pool/subpool via /ssc bulk add and reloaded.
+                    // Re-seed at the same period so the rotation reflects the new items
+                    // immediately, without burning the period or resetting counters.
+                    repickAtCurrentPeriod(shop.getShopId(), pool, existing, now);
                 } else {
                     // Stored period is current or ahead of the clock (typically from a prior
                     // force-advance). Repair advancesAt if it drifted past the next natural
@@ -226,6 +233,49 @@ public class PoolRotationManager {
         } catch (Exception e) {
             plugin.getLogger().log(Level.WARNING, "Error during pool rotation check", e);
         }
+    }
+
+    /**
+     * Returns true when the cached active items don't reflect what {@code selectActive} would
+     * pick now: either the list is empty while the pool has items, the size doesn't match
+     * the pool's {@code visible} count, or any cached item key no longer exists in the pool's
+     * current effective item set (flat items + all subpool items).
+     */
+    private boolean isActiveListStale(PoolConfig pool, RotationState existing) {
+        List<String> active = existing.getActiveItems();
+        boolean poolHasItems = !pool.getItems().isEmpty()
+                || pool.getSubpools().values().stream().anyMatch(s -> !s.getItems().isEmpty());
+
+        if (!poolHasItems) return false; // Nothing to pick — leave the empty state alone.
+        if (active.isEmpty()) return true;
+        if (active.size() != pool.getVisible()) return true;
+
+        Set<String> validKeys = new HashSet<>(pool.getItems().keySet());
+        for (var sub : pool.getSubpools().values()) {
+            validKeys.addAll(sub.getItems().keySet());
+        }
+        for (String key : active) {
+            if (!validKeys.contains(key)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Re-runs {@code selectActive} at the existing period without wiping counters or burning
+     * a rotation tick. Used when the cached active list is stale due to a config change
+     * (e.g. items added to a previously-empty pool). Counters aren't reset because nothing
+     * meaningful was actually purchased on the stale items.
+     */
+    private void repickAtCurrentPeriod(String shopId, PoolConfig pool, RotationState existing, ZonedDateTime now) {
+        List<String> newActive = RotationScheduler.selectActive(shopId, pool, existing.getPeriodIndex());
+        long advancesAt = RotationScheduler.advancesAt(pool, existing.getPeriodIndex(), now);
+        RotationState refreshed = new RotationState(
+                shopId, pool.getName(), existing.getPeriodIndex(), newActive, advancesAt);
+        storeState(refreshed);
+        plugin.getPacketManager().scheduleRotationPush(shopId);
+        plugin.getLogger().info("Pool '" + pool.getName() + "' in shop " + shopId
+                + " re-picked active items at period " + existing.getPeriodIndex()
+                + " (active: " + newActive + ")");
     }
 
     private void seedInitial(String shopId, PoolConfig pool, long periodIndex, ZonedDateTime now) {

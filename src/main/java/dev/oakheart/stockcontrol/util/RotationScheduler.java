@@ -2,6 +2,8 @@ package dev.oakheart.stockcontrol.util;
 
 import dev.oakheart.stockcontrol.data.PoolConfig;
 import dev.oakheart.stockcontrol.data.RotationMode;
+import dev.oakheart.stockcontrol.data.SubpoolConfig;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.time.DayOfWeek;
 import java.time.ZonedDateTime;
@@ -34,6 +36,10 @@ public final class RotationScheduler {
         return switch (pool.getSchedule()) {
             case DAILY -> previousDailyBoundary(now, pool.getResetTime()).toEpochSecond() / 86400L;
             case WEEKLY -> previousWeeklyBoundary(now, pool.getResetDay(), pool.getResetTime()).toEpochSecond() / 604800L;
+            case MONTHLY -> {
+                ZonedDateTime boundary = previousMonthlyBoundary(now, pool.getResetTime());
+                yield boundary.getYear() * 12L + boundary.getMonthValue();
+            }
             case INTERVAL -> Math.floorDiv(now.toEpochSecond(), pool.getIntervalSeconds());
         };
     }
@@ -53,6 +59,8 @@ public final class RotationScheduler {
             case DAILY -> previousDailyBoundary(reference, pool.getResetTime()).plusDays(1).toEpochSecond();
             case WEEKLY -> previousWeeklyBoundary(reference, pool.getResetDay(), pool.getResetTime())
                     .plusWeeks(1).toEpochSecond();
+            case MONTHLY -> previousMonthlyBoundary(reference, pool.getResetTime())
+                    .plusMonths(1).toEpochSecond();
             case INTERVAL -> {
                 long nowEpoch = reference.toEpochSecond();
                 long clockPeriod = Math.floorDiv(nowEpoch, pool.getIntervalSeconds());
@@ -72,8 +80,52 @@ public final class RotationScheduler {
      * @return Ordered item keys (size == pool.getVisible())
      */
     public static List<String> selectActive(String shopId, PoolConfig pool, long periodIndex) {
-        List<String> allKeys = new ArrayList<>(pool.getItems().keySet());
-        int visible = pool.getVisible();
+        if (pool.hasSubpools()) {
+            return selectActiveFromSubpools(shopId, pool, periodIndex);
+        }
+        return selectFromItems(shopId, pool.getName(), pool.getMode(),
+                new ArrayList<>(pool.getItems().keySet()), pool.getVisible(), periodIndex);
+    }
+
+    /**
+     * Returns the subpool that is spotlighted for the given period, or null if
+     * the pool has no subpools. Subpool selection is deterministic by period.
+     *
+     * @param shopId       The owning shop ID
+     * @param pool         The pool configuration
+     * @param periodIndex  The period to compute for
+     * @return The active subpool for this period, or null if the pool is flat
+     */
+    public static @Nullable SubpoolConfig selectActiveSubpool(String shopId, PoolConfig pool, long periodIndex) {
+        if (!pool.hasSubpools()) return null;
+        List<String> subpoolNames = new ArrayList<>(pool.getSubpools().keySet());
+        if (subpoolNames.isEmpty()) return null;
+
+        if (pool.getMode() == RotationMode.SEQUENTIAL) {
+            int idx = (int) Math.floorMod(periodIndex, subpoolNames.size());
+            return pool.getSubpool(subpoolNames.get(idx));
+        }
+        // RANDOM: deterministic seed picks one subpool per period.
+        long seed = seedFor(shopId, pool.getName() + "::subpool", periodIndex);
+        int idx = (int) Math.floorMod(new Random(seed).nextLong(), subpoolNames.size());
+        if (idx < 0) idx += subpoolNames.size();
+        return pool.getSubpool(subpoolNames.get(idx));
+    }
+
+    private static List<String> selectActiveFromSubpools(String shopId, PoolConfig pool, long periodIndex) {
+        SubpoolConfig sub = selectActiveSubpool(shopId, pool, periodIndex);
+        if (sub == null) return Collections.emptyList();
+
+        // Subpool inherits parent's mode; visible count may be overridden per subpool.
+        int subVisible = sub.effectiveVisible(pool);
+        // Seed the inner item selection with the subpool name so different subpools picked
+        // in the same period produce different inner shuffles (avoids correlation across pools).
+        return selectFromItems(shopId, pool.getName() + "::" + sub.getName(),
+                pool.getMode(), new ArrayList<>(sub.getItems().keySet()), subVisible, periodIndex);
+    }
+
+    private static List<String> selectFromItems(String shopId, String poolKey, RotationMode mode,
+                                                List<String> allKeys, int visible, long periodIndex) {
         if (visible <= 0 || allKeys.isEmpty()) {
             return Collections.emptyList();
         }
@@ -81,7 +133,7 @@ public final class RotationScheduler {
             return allKeys;
         }
 
-        if (pool.getMode() == RotationMode.SEQUENTIAL) {
+        if (mode == RotationMode.SEQUENTIAL) {
             int start = (int) Math.floorMod(periodIndex * visible, allKeys.size());
             List<String> picked = new ArrayList<>(visible);
             for (int i = 0; i < visible; i++) {
@@ -91,7 +143,7 @@ public final class RotationScheduler {
         }
 
         // RANDOM: seed a Random deterministically.
-        long seed = seedFor(shopId, pool.getName(), periodIndex);
+        long seed = seedFor(shopId, poolKey, periodIndex);
         List<String> shuffled = new ArrayList<>(allKeys);
         Collections.shuffle(shuffled, new Random(seed));
         return new ArrayList<>(shuffled.subList(0, visible));
@@ -129,6 +181,13 @@ public final class RotationScheduler {
                 ? now.with(TemporalAdjusters.previous(targetDay))
                         .withHour(hm[0]).withMinute(hm[1]).withSecond(0).withNano(0)
                 : candidate;
+    }
+
+    private static ZonedDateTime previousMonthlyBoundary(ZonedDateTime now, String resetTime) {
+        int[] hm = parseHm(resetTime);
+        ZonedDateTime thisMonth = now.withDayOfMonth(1)
+                .withHour(hm[0]).withMinute(hm[1]).withSecond(0).withNano(0);
+        return thisMonth.isAfter(now) ? thisMonth.minusMonths(1) : thisMonth;
     }
 
     private static int[] parseHm(String resetTime) {

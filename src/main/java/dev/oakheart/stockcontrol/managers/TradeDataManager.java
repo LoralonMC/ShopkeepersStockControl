@@ -20,6 +20,13 @@ import java.util.logging.Level;
  */
 public class TradeDataManager {
 
+    /**
+     * Display sentinel for "remaining trades" on unlimited ({@code max-trades: -1}) trades.
+     * Returned from {@link #getRemainingTrades} and friends so PlaceholderAPI / chat output
+     * can either show this large number directly or translate it to a friendlier label.
+     */
+    public static final int UNLIMITED_REMAINING = Integer.MAX_VALUE;
+
     private final ShopkeepersStockControl plugin;
     private final DataStore dataStore;
 
@@ -209,6 +216,7 @@ public class TradeDataManager {
         }
 
         int limit = getTradeLimit(shopId, tradeKey);
+        if (limit < 0) return true; // Unlimited (-1 sentinel)
         return data.getTradesUsed() < limit;
     }
 
@@ -219,11 +227,13 @@ public class TradeDataManager {
         TradeConfig tradeConfig = shopConfig.findTradeLimits(tradeKey);
         if (tradeConfig == null) return true; // Untracked trade
 
-        // Check global stock
-        GlobalTradeData globalData = getGlobalTradeData(shopId, tradeKey);
-        int globalUsed = globalData != null ? globalData.getTradesUsed() : 0;
-        if (globalUsed >= tradeConfig.getMaxTrades()) {
-            return false;
+        // Check global stock (skipped when unlimited — -1 means "no per-period cap").
+        if (!tradeConfig.isUnlimited()) {
+            GlobalTradeData globalData = getGlobalTradeData(shopId, tradeKey);
+            int globalUsed = globalData != null ? globalData.getTradesUsed() : 0;
+            if (globalUsed >= tradeConfig.getMaxTrades()) {
+                return false;
+            }
         }
 
         // Check per-player cap if configured
@@ -253,17 +263,19 @@ public class TradeDataManager {
             return getRemainingTradesShared(playerId, shopId, tradeKey, shopConfig);
         }
 
+        int limit = getTradeLimit(shopId, tradeKey);
+        if (limit < 0) return UNLIMITED_REMAINING;
+
         PlayerTradeData data = getTradeData(playerId, shopId, tradeKey);
 
         if (data == null) {
-            return getTradeLimit(shopId, tradeKey);
+            return limit;
         }
 
         if (hasCooldownExpired(playerId, shopId, tradeKey)) {
-            return getTradeLimit(shopId, tradeKey);
+            return limit;
         }
 
-        int limit = getTradeLimit(shopId, tradeKey);
         return Math.max(0, limit - data.getTradesUsed());
     }
 
@@ -284,7 +296,9 @@ public class TradeDataManager {
         }
 
         int globalUsed = globalData != null ? globalData.getTradesUsed() : 0;
-        int globalRemaining = Math.max(0, tradeConfig.getMaxTrades() - globalUsed);
+        int globalRemaining = tradeConfig.isUnlimited()
+                ? UNLIMITED_REMAINING
+                : Math.max(0, tradeConfig.getMaxTrades() - globalUsed);
 
         // If per-player cap exists, cap the remaining
         int maxPerPlayer = tradeConfig.getMaxPerPlayer();
@@ -310,6 +324,7 @@ public class TradeDataManager {
      */
     private int computeEffectiveRemaining(int globalMax, UUID playerId, String shopId,
                                            String tradeKey, TradeConfig tradeConfig) {
+        int effectiveGlobalMax = tradeConfig.isUnlimited() ? UNLIMITED_REMAINING : globalMax;
         int maxPerPlayer = tradeConfig.getMaxPerPlayer();
         if (maxPerPlayer > 0) {
             PlayerTradeData playerData = getTradeData(playerId, shopId, tradeKey);
@@ -319,9 +334,9 @@ public class TradeDataManager {
                 playerUsed = playerData.getTradesUsed();
             }
             int playerRemaining = Math.max(0, maxPerPlayer - playerUsed);
-            return Math.min(globalMax, playerRemaining);
+            return Math.min(effectiveGlobalMax, playerRemaining);
         }
-        return globalMax;
+        return effectiveGlobalMax;
     }
 
     /**
@@ -335,6 +350,7 @@ public class TradeDataManager {
     public int getGlobalRemainingTrades(String shopId, String tradeKey) {
         TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
         if (tradeConfig == null) return 0;
+        if (tradeConfig.isUnlimited()) return UNLIMITED_REMAINING;
 
         GlobalTradeData data = getGlobalTradeData(shopId, tradeKey);
         if (data == null) return tradeConfig.getMaxTrades();

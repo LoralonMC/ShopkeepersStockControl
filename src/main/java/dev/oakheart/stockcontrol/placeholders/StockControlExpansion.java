@@ -100,25 +100,34 @@ public class StockControlExpansion extends PlaceholderExpansion {
 
         TradeDataManager tdm = plugin.getTradeDataManager();
 
-        // Determine effective max for the player (per-player cap for shared mode)
+        // Determine effective max for the player (per-player cap for shared mode).
+        // Render unlimited (-1) as "∞" — placeholders are display-only, so callers can
+        // either show this or branch on it. The numeric `globalmax` placeholder still
+        // returns the raw -1 for callers that key off it.
+        boolean unlimitedEffective = tradeConfig.isUnlimited()
+                && !(shopConfig.isShared() && tradeConfig.getMaxPerPlayer() > 0);
         int effectiveMax = (shopConfig.isShared() && tradeConfig.getMaxPerPlayer() > 0)
                 ? tradeConfig.getMaxPerPlayer()
                 : tradeConfig.getMaxTrades();
 
         switch (action) {
-            case "remaining":
+            case "remaining": {
+                if (unlimitedEffective) return "∞";
                 return String.valueOf(tdm.getRemainingTrades(player.getUniqueId(), shopId, tradeKey));
+            }
 
             case "used": {
                 int remaining = tdm.getRemainingTrades(player.getUniqueId(), shopId, tradeKey);
+                if (unlimitedEffective) return String.valueOf(Math.max(0, TradeDataManager.UNLIMITED_REMAINING - remaining));
                 return String.valueOf(effectiveMax - remaining);
             }
 
             case "max":
-                return String.valueOf(effectiveMax);
+                return unlimitedEffective ? "∞" : String.valueOf(effectiveMax);
 
             case "cooldown": {
                 if (tradeConfig.getCooldownMode() == CooldownMode.NONE) {
+                    if (unlimitedEffective) return "Available";
                     int remaining = tdm.getRemainingTrades(player.getUniqueId(), shopId, tradeKey);
                     return remaining > 0 ? "Available" : "Sold out";
                 }
@@ -133,9 +142,10 @@ public class StockControlExpansion extends PlaceholderExpansion {
                 return tdm.getResetTimeString(shopId, tradeKey);
 
             case "globalmax":
-                return String.valueOf(tradeConfig.getMaxTrades());
+                return tradeConfig.isUnlimited() ? "∞" : String.valueOf(tradeConfig.getMaxTrades());
 
             case "globalremaining":
+                if (tradeConfig.isUnlimited()) return "∞";
                 if (!shopConfig.isShared()) return String.valueOf(tradeConfig.getMaxTrades());
                 return String.valueOf(tdm.getGlobalRemainingTrades(shopId, tradeKey));
 

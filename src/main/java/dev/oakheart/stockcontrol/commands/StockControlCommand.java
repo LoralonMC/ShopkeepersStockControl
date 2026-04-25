@@ -26,10 +26,12 @@ public class StockControlCommand {
 
     private final ShopkeepersStockControl plugin;
     private final MessageManager messageManager;
+    private final BulkCommandHandler bulkHandler;
 
     public StockControlCommand(ShopkeepersStockControl plugin) {
         this.plugin = plugin;
         this.messageManager = plugin.getMessageManager();
+        this.bulkHandler = new BulkCommandHandler(plugin);
     }
 
     public void register() {
@@ -209,6 +211,33 @@ public class StockControlCommand {
                                                                     com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "duration"));
                                                             return Command.SINGLE_SUCCESS;
                                                         }))))))
+                // bulk add <shop> <pool> [subpool] <items-file> | bulk clear <shop> <count>
+                .then(Commands.literal("bulk")
+                        .requires(src -> src.getSender().hasPermission("shopkeepersstock.bulk"))
+                        .then(Commands.literal("add")
+                                .then(Commands.argument("shop", StringArgumentType.word())
+                                        .then(Commands.argument("pool", StringArgumentType.word())
+                                                .then(Commands.argument("subpool", StringArgumentType.word())
+                                                        .then(Commands.argument("file", StringArgumentType.greedyString())
+                                                                .executes(ctx -> {
+                                                                    bulkHandler.handleBulkAdd(
+                                                                            ctx.getSource().getSender(),
+                                                                            StringArgumentType.getString(ctx, "shop"),
+                                                                            StringArgumentType.getString(ctx, "pool"),
+                                                                            StringArgumentType.getString(ctx, "subpool"),
+                                                                            StringArgumentType.getString(ctx, "file"));
+                                                                    return Command.SINGLE_SUCCESS;
+                                                                }))))))
+                        .then(Commands.literal("clear")
+                                .then(Commands.argument("shop", StringArgumentType.word())
+                                        .then(Commands.argument("count", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 10000))
+                                                .executes(ctx -> {
+                                                    bulkHandler.handleBulkClear(
+                                                            ctx.getSource().getSender(),
+                                                            StringArgumentType.getString(ctx, "shop"),
+                                                            com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "count"));
+                                                    return Command.SINGLE_SUCCESS;
+                                                })))))
                 .build();
     }
 
@@ -410,7 +439,7 @@ public class StockControlCommand {
         for (TradeConfig trade : shop.getTrades().values()) {
             StringBuilder details = new StringBuilder();
             details.append("slot ").append(trade.getSlot())
-                    .append(", max ").append(trade.getMaxTrades());
+                    .append(", max ").append(trade.isUnlimited() ? "∞" : trade.getMaxTrades());
 
             if (trade.getCooldownMode() != shop.getCooldownMode()) {
                 details.append(", mode ").append(trade.getCooldownMode().name().toLowerCase());
@@ -434,16 +463,26 @@ public class StockControlCommand {
                 String poolDetails = "ui-slots " + pool.getUiSlots()
                         + ", visible " + pool.getVisible()
                         + ", mode " + pool.getMode().name().toLowerCase()
-                        + ", schedule " + pool.getSchedule().name().toLowerCase();
+                        + ", schedule " + pool.getSchedule().name().toLowerCase()
+                        + (pool.hasSubpools() ? ", subpools=" + pool.getSubpools().size() : "");
                 messageManager.sendCommand(sender, "info-pool-entry",
                         Placeholder.unparsed("pool", pool.getName()),
                         Placeholder.unparsed("details", poolDetails));
                 for (PoolItemConfig item : pool.getItems().values()) {
                     String itemDetails = "source " + item.getSourceSlot()
-                            + ", max " + item.getMaxTrades();
+                            + ", max " + (item.isUnlimited() ? "∞" : item.getMaxTrades());
                     messageManager.sendCommand(sender, "info-pool-item-entry",
                             Placeholder.unparsed("key", item.getItemKey()),
                             Placeholder.unparsed("details", itemDetails));
+                }
+                for (dev.oakheart.stockcontrol.data.SubpoolConfig sub : pool.getSubpools().values()) {
+                    for (PoolItemConfig item : sub.getItems().values()) {
+                        String itemDetails = "[" + sub.getName() + "] source " + item.getSourceSlot()
+                                + ", max " + (item.isUnlimited() ? "∞" : item.getMaxTrades());
+                        messageManager.sendCommand(sender, "info-pool-item-entry",
+                                Placeholder.unparsed("key", item.getItemKey()),
+                                Placeholder.unparsed("details", itemDetails));
+                    }
                 }
             }
         }
@@ -942,6 +981,7 @@ public class StockControlCommand {
 
             ShopConfig shop = plugin.getConfigManager().getShop(data.getShopId());
             TradeConfig resolved = shop != null ? shop.findTradeLimits(data.getTradeKey()) : null;
+            boolean unlimited = resolved != null && resolved.isUnlimited();
             int maxTrades = resolved != null ? resolved.getMaxTrades() : data.getTradesUsed();
 
             String shopName = shop != null ? shop.getName() : data.getShopId();
@@ -953,9 +993,9 @@ public class StockControlCommand {
                     Placeholder.unparsed("trade", data.getTradeKey()));
             messageManager.sendCommand(sender, "check-used",
                     Placeholder.unparsed("used", String.valueOf(usedCount)),
-                    Placeholder.unparsed("max", String.valueOf(maxTrades)));
+                    Placeholder.unparsed("max", unlimited ? "∞" : String.valueOf(maxTrades)));
             messageManager.sendCommand(sender, "check-remaining",
-                    Placeholder.unparsed("remaining", String.valueOf(remaining)));
+                    Placeholder.unparsed("remaining", unlimited ? "∞" : String.valueOf(remaining)));
 
             if (timeRemaining < 0) {
                 messageManager.sendCommand(sender, "check-cooldown-never");

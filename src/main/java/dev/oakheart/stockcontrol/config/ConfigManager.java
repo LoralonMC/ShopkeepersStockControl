@@ -8,8 +8,12 @@ import dev.oakheart.stockcontrol.data.RotationMode;
 import dev.oakheart.stockcontrol.data.RotationSchedule;
 import dev.oakheart.stockcontrol.data.ShopConfig;
 import dev.oakheart.stockcontrol.data.StockMode;
+import dev.oakheart.stockcontrol.data.SubpoolConfig;
 import dev.oakheart.stockcontrol.data.TradeConfig;
 import dev.oakheart.stockcontrol.util.DurationParser;
+import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -353,44 +357,108 @@ public class ConfigManager {
                 }
             }
 
-            Map<String, PoolItemConfig> items = new LinkedHashMap<>();
-            String itemsPath = poolPath + ".items";
-            if (tradesNode.isSection(itemsPath)) {
-                for (String itemKey : tradesNode.getKeys(itemsPath, false)) {
-                    String itemPath = itemsPath + "." + itemKey;
-                    if (!tradesNode.isSection(itemPath)) continue;
+            Map<String, PoolItemConfig> items = parsePoolItems(tradesNode, poolPath + ".items",
+                    shopId, poolName, shopCooldownMode, shopResetTime, shopResetDay, shopMaxPerPlayer);
 
-                    int sourceSlot = tradesNode.getInt(itemPath + ".source", -1);
-                    int maxTrades = tradesNode.getInt(itemPath + ".max-trades", 1);
-                    int cooldown = tradesNode.getInt(itemPath + ".cooldown", 86400);
+            ItemStack defaultPrice = parseItemStack(tradesNode, poolPath + ".price");
 
-                    CooldownMode itemCooldownMode = tradesNode.contains(itemPath + ".cooldown-mode")
-                            ? CooldownMode.fromString(tradesNode.getString(itemPath + ".cooldown-mode"))
-                            : shopCooldownMode;
-                    String itemResetTime = tradesNode.getString(itemPath + ".reset-time", shopResetTime);
-                    String rawItemResetDay = tradesNode.getString(itemPath + ".reset-day");
-                    String itemResetDay = rawItemResetDay != null ? rawItemResetDay.toUpperCase() : shopResetDay;
-
-                    int itemMaxPerPlayer = tradesNode.contains(itemPath + ".max-per-player")
-                            ? tradesNode.getInt(itemPath + ".max-per-player", 0)
-                            : shopMaxPerPlayer;
-
-                    if (isDebugMode()) {
-                        plugin.getLogger().info("Loading pool item '" + itemKey + "' for pool " + poolName
-                                + " in shop " + shopId + ": source=" + sourceSlot
-                                + ", max-trades=" + maxTrades + ", mode=" + itemCooldownMode);
-                    }
-
-                    items.put(itemKey, new PoolItemConfig(itemKey, sourceSlot, maxTrades, cooldown,
-                            itemCooldownMode, itemResetTime, itemResetDay, itemMaxPerPlayer));
-                }
-            }
+            Map<String, SubpoolConfig> subpools = parseSubpools(tradesNode, poolPath + ".subpools",
+                    shopId, poolName, shopCooldownMode, shopResetTime, shopResetDay, shopMaxPerPlayer);
 
             pools.put(poolName, new PoolConfig(poolName, uiSlots, visible, mode, schedule,
-                    poolResetTime, poolResetDay, intervalSeconds, items));
+                    poolResetTime, poolResetDay, intervalSeconds, items, defaultPrice, subpools));
         }
 
         return pools;
+    }
+
+    /**
+     * Parses pool items at the given config path (used for both flat pool items and subpool items).
+     */
+    private Map<String, PoolItemConfig> parsePoolItems(dev.oakheart.config.ConfigManager tradesNode,
+                                                       String itemsPath, String shopId, String poolName,
+                                                       CooldownMode shopCooldownMode,
+                                                       String shopResetTime, String shopResetDay,
+                                                       int shopMaxPerPlayer) {
+        Map<String, PoolItemConfig> items = new LinkedHashMap<>();
+        if (!tradesNode.isSection(itemsPath)) return items;
+
+        for (String itemKey : tradesNode.getKeys(itemsPath, false)) {
+            String itemPath = itemsPath + "." + itemKey;
+            if (!tradesNode.isSection(itemPath)) continue;
+
+            int sourceSlot = tradesNode.getInt(itemPath + ".source", -1);
+            int maxTrades = tradesNode.getInt(itemPath + ".max-trades", 1);
+            int cooldown = tradesNode.getInt(itemPath + ".cooldown", 86400);
+
+            CooldownMode itemCooldownMode = tradesNode.contains(itemPath + ".cooldown-mode")
+                    ? CooldownMode.fromString(tradesNode.getString(itemPath + ".cooldown-mode"))
+                    : shopCooldownMode;
+            String itemResetTime = tradesNode.getString(itemPath + ".reset-time", shopResetTime);
+            String rawItemResetDay = tradesNode.getString(itemPath + ".reset-day");
+            String itemResetDay = rawItemResetDay != null ? rawItemResetDay.toUpperCase() : shopResetDay;
+
+            int itemMaxPerPlayer = tradesNode.contains(itemPath + ".max-per-player")
+                    ? tradesNode.getInt(itemPath + ".max-per-player", 0)
+                    : shopMaxPerPlayer;
+
+            if (isDebugMode()) {
+                plugin.getLogger().info("Loading pool item '" + itemKey + "' for pool " + poolName
+                        + " in shop " + shopId + ": source=" + sourceSlot
+                        + ", max-trades=" + maxTrades + ", mode=" + itemCooldownMode);
+            }
+
+            items.put(itemKey, new PoolItemConfig(itemKey, sourceSlot, maxTrades, cooldown,
+                    itemCooldownMode, itemResetTime, itemResetDay, itemMaxPerPlayer));
+        }
+        return items;
+    }
+
+    /**
+     * Parses subpools at the given config path.
+     * Each subpool has its own item list and may override the parent pool's
+     * visible count and price.
+     */
+    private Map<String, SubpoolConfig> parseSubpools(dev.oakheart.config.ConfigManager tradesNode,
+                                                     String subpoolsPath, String shopId, String poolName,
+                                                     CooldownMode shopCooldownMode,
+                                                     String shopResetTime, String shopResetDay,
+                                                     int shopMaxPerPlayer) {
+        Map<String, SubpoolConfig> subpools = new LinkedHashMap<>();
+        if (!tradesNode.isSection(subpoolsPath)) return subpools;
+
+        for (String subName : tradesNode.getKeys(subpoolsPath, false)) {
+            String subPath = subpoolsPath + "." + subName;
+            if (!tradesNode.isSection(subPath)) continue;
+
+            Integer visibleOverride = tradesNode.contains(subPath + ".visible")
+                    ? tradesNode.getInt(subPath + ".visible", 0)
+                    : null;
+            ItemStack priceOverride = parseItemStack(tradesNode, subPath + ".price");
+            Map<String, PoolItemConfig> subItems = parsePoolItems(tradesNode, subPath + ".items",
+                    shopId, poolName + "::" + subName, shopCooldownMode, shopResetTime, shopResetDay,
+                    shopMaxPerPlayer);
+
+            subpools.put(subName, new SubpoolConfig(subName, visibleOverride, subItems, priceOverride));
+        }
+        return subpools;
+    }
+
+    /**
+     * Parses a simple ItemStack stanza ({@code material: STONE, amount: 1}) at the given path.
+     * Returns null if the section is missing or the material can't be resolved.
+     */
+    private @Nullable ItemStack parseItemStack(dev.oakheart.config.ConfigManager tradesNode, String path) {
+        if (!tradesNode.isSection(path)) return null;
+        String materialName = tradesNode.getString(path + ".material");
+        if (materialName == null || materialName.isBlank()) return null;
+        Material material = Material.matchMaterial(materialName.toUpperCase());
+        if (material == null) {
+            plugin.getLogger().warning("Unknown material '" + materialName + "' at " + path);
+            return null;
+        }
+        int amount = Math.max(1, tradesNode.getInt(path + ".amount", 1));
+        return new ItemStack(material, amount);
     }
 
     /**
@@ -454,8 +522,11 @@ public class ConfigManager {
             errors.add("Trade '" + itemKey + "' in shop '" + shop.getShopId()
                     + "': key must not contain a comma");
         }
-        if (maxTrades <= 0) {
-            errors.add("Trade '" + itemKey + "': max-trades must be > 0");
+        // -1 is the "unlimited" sentinel (no per-period cap; the rotation IS the limit
+        // for collectibles). 0 is rejected because a global cap of zero would block every
+        // trade — almost certainly a typo.
+        if (maxTrades == 0 || maxTrades < -1) {
+            errors.add("Trade '" + itemKey + "': max-trades must be > 0 or -1 (unlimited)");
         }
         if (mode == CooldownMode.ROLLING && cooldownSeconds <= 0) {
             errors.add("Trade '" + itemKey + "': cooldown must be > 0 for rolling mode");
@@ -511,9 +582,28 @@ public class ConfigManager {
             errors.add(where + ": visible (" + pool.getVisible()
                     + ") must equal ui-slots size (" + pool.getUiSlots().size() + ")");
         }
-        if (pool.getItems().size() < pool.getVisible()) {
+
+        if (pool.hasSubpools()) {
+            // With subpools, flat pool.items can be empty. Each subpool that has at least
+            // one item must satisfy the "items >= effective visible" rule. Empty subpools
+            // are allowed (bootstrap mode — they'll just be skipped at rotation time).
+            for (SubpoolConfig sub : pool.getSubpools().values()) {
+                int subVisible = sub.effectiveVisible(pool);
+                if (subVisible > pool.getUiSlots().size()) {
+                    errors.add(where + ", subpool '" + sub.getName() + "': visible (" + subVisible
+                            + ") cannot exceed pool ui-slots size (" + pool.getUiSlots().size() + ")");
+                }
+                if (sub.getItems().size() > 0 && sub.getItems().size() < subVisible) {
+                    errors.add(where + ", subpool '" + sub.getName() + "': items count ("
+                            + sub.getItems().size() + ") must be >= effective visible ("
+                            + subVisible + ") (or empty for bootstrap)");
+                }
+            }
+        } else if (pool.getItems().size() > 0 && pool.getItems().size() < pool.getVisible()) {
+            // Empty flat pools are allowed (bootstrap mode); only enforce the rule when
+            // the pool has at least one item.
             errors.add(where + ": items count (" + pool.getItems().size()
-                    + ") must be >= visible (" + pool.getVisible() + ")");
+                    + ") must be >= visible (" + pool.getVisible() + ") (or empty for bootstrap)");
         }
 
         for (int ui : pool.getUiSlots()) {
@@ -526,7 +616,7 @@ public class ConfigManager {
         }
 
         switch (pool.getSchedule()) {
-            case DAILY, WEEKLY -> {
+            case DAILY, WEEKLY, MONTHLY -> {
                 if (!pool.getResetTime().matches("^([0-1][0-9]|2[0-3]):[0-5][0-9]$")) {
                     errors.add(where + ": reset-time must be HH:mm. Current: '" + pool.getResetTime() + "'");
                 }
@@ -544,23 +634,40 @@ public class ConfigManager {
         }
 
         for (PoolItemConfig item : pool.getItems().values()) {
-            String itemKey = item.getItemKey();
-
-            if (!allItemKeys.add(itemKey)) {
-                errors.add(where + ": item key '" + itemKey
-                        + "' duplicates a static trade or another pool item in this shop");
-            }
-            if (!usedSourceSlots.add(item.getSourceSlot())) {
-                errors.add(where + ": Shopkeepers source slot " + item.getSourceSlot()
-                        + " (item '" + itemKey + "') collides with another trade or pool item");
-            }
-
-            // Pool items share the same numeric/format checks as static trades.
-            // UI slot is pool-owned; pass -1 as a placeholder that the helper ignores.
-            validateTradeFields(errors, shop, itemKey, -1, item.getSourceSlot(),
-                    item.getMaxTrades(), item.getCooldownSeconds(), item.getCooldownMode(),
-                    item.getResetTime(), item.getResetDay(), item.getMaxPerPlayer());
+            validatePoolItem(errors, shop, where, item, allItemKeys, usedSourceSlots);
         }
+
+        // Subpool items: validate each subpool's items the same way the flat list is validated.
+        for (SubpoolConfig sub : pool.getSubpools().values()) {
+            String subWhere = where + ", subpool '" + sub.getName() + "'";
+            for (PoolItemConfig item : sub.getItems().values()) {
+                validatePoolItem(errors, shop, subWhere, item, allItemKeys, usedSourceSlots);
+            }
+        }
+    }
+
+    /**
+     * Shared validation for one pool/subpool item.
+     */
+    private void validatePoolItem(Set<String> errors, ShopConfig shop, String where,
+                                  PoolItemConfig item, Set<String> allItemKeys,
+                                  Set<Integer> usedSourceSlots) {
+        String itemKey = item.getItemKey();
+
+        if (!allItemKeys.add(itemKey)) {
+            errors.add(where + ": item key '" + itemKey
+                    + "' duplicates a static trade or another pool item in this shop");
+        }
+        if (!usedSourceSlots.add(item.getSourceSlot())) {
+            errors.add(where + ": Shopkeepers source slot " + item.getSourceSlot()
+                    + " (item '" + itemKey + "') collides with another trade or pool item");
+        }
+
+        // Pool items share the same numeric/format checks as static trades.
+        // UI slot is pool-owned; pass -1 as a placeholder that the helper ignores.
+        validateTradeFields(errors, shop, itemKey, -1, item.getSourceSlot(),
+                item.getMaxTrades(), item.getCooldownSeconds(), item.getCooldownMode(),
+                item.getResetTime(), item.getResetDay(), item.getMaxPerPlayer());
     }
 
     /**
@@ -634,6 +741,17 @@ public class ConfigManager {
 
     public ShopConfig getShop(String shopId) {
         return shops.get(shopId);
+    }
+
+    /**
+     * Returns the live OakheartLib wrapper for trades.yml. Used by commands that
+     * write into the file directly (e.g. {@code /ssc bulk add}, which appends new
+     * subpool entries after creating Shopkeepers offers). After mutating, callers
+     * must invoke {@link dev.oakheart.config.ConfigManager#save()} to persist
+     * and then {@link #reload()} to rebuild the in-memory shop config.
+     */
+    public dev.oakheart.config.ConfigManager getTradesConfig() {
+        return tradesConfig;
     }
 
     /**
