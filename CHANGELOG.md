@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ItemsAdder support for `/ssc bulk add` — the command now resolves item IDs via Nexo or ItemsAdder (whichever is loaded). Items files take an optional `namespace:` field at the top so bare IDs (e.g. `nm_plushie_corgi`) can be qualified for ItemsAdder (`nogs_menagerie:nm_plushie_corgi`); fully qualified IDs (`other_pack:foo`) work unchanged. The same items file format works for both providers — Nexo servers omit the `namespace` field, ItemsAdder servers add it once per file.
+- New optional dependency: ItemsAdder (alongside Nexo; only one is needed).
+
 ### Changed
 
 - Bootstrap-friendly validation — pools with zero items (or subpools with zero items) now load successfully so the operator can declare pool/subpool structure in `trades.yml` *before* running `/ssc bulk add`. Previously empty pools were rejected, which created a chicken-and-egg setup problem. Pools with at least one item still enforce the "items >= visible" rule.

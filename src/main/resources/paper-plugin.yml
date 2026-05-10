@@ -20,6 +20,9 @@ dependencies:
     Nexo:
       load: BEFORE
       required: false
+    ItemsAdder:
+      load: BEFORE
+      required: false
 permissions:
   shopkeepersstock.*:
     description: 'All ShopkeepersStockControl permissions'
@@ -61,7 +64,7 @@ permissions:
     description: 'View and force rotation pool advances'
     default: op
   shopkeepersstock.bulk:
-    description: 'Bulk-add and bulk-clear Shopkeepers offers via the Nexo API'
+    description: 'Bulk-add and bulk-clear Shopkeepers offers via the Nexo or ItemsAdder API'
     default: op
   shopkeepersstock.admin:
     description: 'Admin diagnostics and stress testing (/ssc diag, /ssc stress)'

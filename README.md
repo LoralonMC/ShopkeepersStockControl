@@ -26,6 +26,7 @@ Per-player trade limits and shared global stock for [Shopkeepers](https://github
   - [PacketEvents](https://github.com/retrooper/packetevents) 2.10.0+
 - **Optional plugins**:
   - [PlaceholderAPI](https://github.com/PlaceholderAPI/PlaceholderAPI)
+  - [Nexo](https://nexomc.com/) or [ItemsAdder](https://github.com/PluginBugs/Issues-ItemsAdder) — required only when using `/ssc bulk add` to import custom item IDs
 
 ## Installation
 

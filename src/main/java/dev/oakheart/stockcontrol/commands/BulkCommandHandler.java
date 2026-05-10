@@ -3,6 +3,7 @@ package dev.oakheart.stockcontrol.commands;
 import com.nexomc.nexo.api.NexoItems;
 import com.nexomc.nexo.items.ItemBuilder;
 import com.nisovin.shopkeepers.api.ShopkeepersAPI;
+import dev.lone.itemsadder.api.CustomStack;
 import com.nisovin.shopkeepers.api.shopkeeper.Shopkeeper;
 import com.nisovin.shopkeepers.api.shopkeeper.admin.regular.RegularAdminShopkeeper;
 import com.nisovin.shopkeepers.api.shopkeeper.offers.TradeOffer;
@@ -29,16 +30,19 @@ import java.util.logging.Level;
 /**
  * Bulk-import command for Shopkeepers admin shops.
  * <p>
- * Reads a YAML file listing Nexo item IDs, resolves each via the Nexo API, then
- * uses the Shopkeepers public API ({@link RegularAdminShopkeeper#addOffers}) to
- * add a {@link TradeOffer} per item using the parent pool's default price.
+ * Reads a YAML file listing custom item IDs, resolves each via the Nexo or
+ * ItemsAdder API (whichever is loaded), then uses the Shopkeepers public API
+ * ({@link RegularAdminShopkeeper#addOffers}) to add a {@link TradeOffer} per
+ * item using the parent pool's default price.
  * <p>
  * The operator runs this once per (sub)pool during initial setup and again only
- * when adding new content. Output includes a paste-ready YAML snippet showing
- * each item's source slot — the operator copies that into {@code trades.yml}
- * under the matching pool/subpool's {@code items:} section.
+ * when adding new content. Item entries are written directly into trades.yml
+ * (slot mapping + max-trades) so {@code /ssc reload} picks them up without any
+ * manual paste step.
  */
 public final class BulkCommandHandler {
+
+    private enum ItemProvider { NEXO, ITEMSADDER }
 
     private final ShopkeepersStockControl plugin;
 
@@ -57,8 +61,9 @@ public final class BulkCommandHandler {
      */
     public void handleBulkAdd(CommandSender sender, String shopName, String poolName,
                               @Nullable String subpoolName, String itemsFile) {
-        if (Bukkit.getPluginManager().getPlugin("Nexo") == null) {
-            sender.sendMessage("§cNexo plugin not loaded — bulk-add requires Nexo for item resolution.");
+        ItemProvider provider = detectProvider();
+        if (provider == null) {
+            sender.sendMessage("§cNeither Nexo nor ItemsAdder is loaded — bulk-add requires one of them for item resolution.");
             return;
         }
 
@@ -89,9 +94,16 @@ public final class BulkCommandHandler {
             return;
         }
 
-        List<String> nexoIds = readNexoIds(file);
-        if (nexoIds.isEmpty()) {
+        ItemsFileData data = readItemsFile(file);
+        if (data.ids().isEmpty()) {
             sender.sendMessage("§cItems file is empty or unreadable: " + file.getName());
+            return;
+        }
+        if (provider == ItemProvider.ITEMSADDER && data.namespace() == null
+                && data.ids().stream().noneMatch(id -> id.contains(":"))) {
+            sender.sendMessage("§cItems file has no 'namespace:' field and IDs are not namespaced — "
+                    + "ItemsAdder requires a namespace. Add e.g. §fnamespace: nogs_menagerie §cat the top of "
+                    + file.getName() + ".");
             return;
         }
 
@@ -104,35 +116,24 @@ public final class BulkCommandHandler {
         }
 
         int existingOfferCount = admin.getOffers().size();
-        List<TradeOffer> newOffers = new ArrayList<>(nexoIds.size());
+        List<TradeOffer> newOffers = new ArrayList<>(data.ids().size());
         Map<String, Integer> resolvedKeyToSlot = new LinkedHashMap<>();
         List<String> failed = new ArrayList<>();
 
         int slot = existingOfferCount;
-        for (String nexoId : nexoIds) {
-            ItemBuilder builder = NexoItems.itemFromId(nexoId);
-            if (builder == null) {
-                failed.add(nexoId);
-                continue;
-            }
-            ItemStack result;
-            try {
-                result = builder.build();
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "Failed to build Nexo item " + nexoId, e);
-                failed.add(nexoId);
-                continue;
-            }
-            if (result == null || result.getType() == Material.AIR) {
-                failed.add(nexoId);
+        for (String rawId : data.ids()) {
+            ItemStack result = resolveItem(rawId, data.namespace(), provider);
+            if (result == null) {
+                failed.add(rawId);
                 continue;
             }
             newOffers.add(TradeOffer.create(result, price.clone(), null));
-            resolvedKeyToSlot.put(deriveItemKey(nexoId), slot++);
+            resolvedKeyToSlot.put(deriveItemKey(rawId), slot++);
         }
 
         if (newOffers.isEmpty()) {
-            sender.sendMessage("§cNothing to add — every Nexo ID failed to resolve."
+            sender.sendMessage("§cNothing to add — every " + provider.name().toLowerCase(Locale.ROOT)
+                    + " ID failed to resolve."
                     + (failed.isEmpty() ? "" : " First failure: " + failed.get(0)));
             return;
         }
@@ -289,33 +290,88 @@ public final class BulkCommandHandler {
         return withYml.isFile() ? withYml : null;
     }
 
-    private List<String> readNexoIds(File file) {
+    /**
+     * Parsed contents of a bulk-add items file. The optional {@code namespace}
+     * is used by ItemsAdder to qualify bare IDs (e.g. {@code nm_plushie_corgi}
+     * → {@code nogs_menagerie:nm_plushie_corgi}); Nexo ignores it. Per-line
+     * IDs that already contain a colon are treated as fully qualified.
+     */
+    private record ItemsFileData(@Nullable String namespace, List<String> ids) {}
+
+    private ItemsFileData readItemsFile(File file) {
         YamlConfiguration cfg = YamlConfiguration.loadConfiguration(file);
-        // Support either a flat list at "items:" or a list at top-level.
-        List<String> ids = cfg.getStringList("items");
-        if (ids.isEmpty()) {
-            // Fall back: if file is a top-level list (e.g. "- nm_plushie_foo"), Bukkit's YamlConfig
-            // can't represent that as a config root, so we accept the convention "items:" only.
-            return List.of();
+        String namespace = cfg.getString("namespace");
+        if (namespace != null) {
+            namespace = namespace.trim();
+            if (namespace.isEmpty()) namespace = null;
         }
-        // Trim and drop blanks.
+        List<String> ids = cfg.getStringList("items");
         List<String> cleaned = new ArrayList<>(ids.size());
         for (String id : ids) {
             if (id == null) continue;
             String trimmed = id.trim();
             if (!trimmed.isEmpty()) cleaned.add(trimmed);
         }
-        return cleaned;
+        return new ItemsFileData(namespace, cleaned);
+    }
+
+    private @Nullable ItemProvider detectProvider() {
+        if (Bukkit.getPluginManager().getPlugin("Nexo") != null) return ItemProvider.NEXO;
+        if (Bukkit.getPluginManager().getPlugin("ItemsAdder") != null) return ItemProvider.ITEMSADDER;
+        return null;
+    }
+
+    private @Nullable ItemStack resolveItem(String rawId, @Nullable String defaultNamespace, ItemProvider provider) {
+        return switch (provider) {
+            case NEXO -> resolveNexoItem(rawId);
+            case ITEMSADDER -> resolveItemsAdderItem(rawId, defaultNamespace);
+        };
+    }
+
+    private @Nullable ItemStack resolveNexoItem(String id) {
+        ItemBuilder builder = NexoItems.itemFromId(id);
+        if (builder == null) return null;
+        try {
+            ItemStack result = builder.build();
+            if (result == null || result.getType() == Material.AIR) return null;
+            return result;
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to build Nexo item " + id, e);
+            return null;
+        }
+    }
+
+    private @Nullable ItemStack resolveItemsAdderItem(String rawId, @Nullable String defaultNamespace) {
+        // Bare IDs in the items file are qualified with the file-level namespace.
+        // IDs that already contain a colon (e.g. "other_pack:foo") are passed through.
+        String fullId = (rawId.contains(":") || defaultNamespace == null)
+                ? rawId
+                : defaultNamespace + ":" + rawId;
+        try {
+            CustomStack stack = CustomStack.getInstance(fullId);
+            if (stack == null) return null;
+            ItemStack result = stack.getItemStack();
+            if (result == null || result.getType() == Material.AIR) return null;
+            // CustomStack.getItemStack() can return a shared reference — clone so callers
+            // (TradeOffer.create) can't mutate the live ItemsAdder template.
+            return result.clone();
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to resolve ItemsAdder item " + fullId, e);
+            return null;
+        }
     }
 
     /**
-     * Derives a stable item key from a Nexo ID by lowercasing and stripping the
-     * common {@code nm_plushie_} / {@code nm_figure_} / {@code nm_adorable_} /
-     * {@code nm_pack_} prefixes used by Nog's Menagerie. Falls back to the raw
-     * ID when no known prefix matches. Used in the paste-ready YAML snippet.
+     * Derives a stable item key from a raw ID by lowercasing, stripping any
+     * leading {@code namespace:} (ItemsAdder), then stripping the common
+     * {@code nm_plushie_} / {@code nm_figure_} / {@code nm_adorable_} /
+     * {@code nm_pack_} prefixes used by Nog's Menagerie. Falls back to the
+     * post-namespace ID when no known prefix matches.
      */
-    private String deriveItemKey(String nexoId) {
-        String lower = nexoId.toLowerCase(Locale.ROOT);
+    private String deriveItemKey(String rawId) {
+        String lower = rawId.toLowerCase(Locale.ROOT);
+        int colon = lower.indexOf(':');
+        if (colon >= 0) lower = lower.substring(colon + 1);
         for (String prefix : new String[]{"nm_plushie_", "nm_figure_", "nm_adorable_", "nm_pack_"}) {
             if (lower.startsWith(prefix)) return lower.substring(prefix.length());
         }

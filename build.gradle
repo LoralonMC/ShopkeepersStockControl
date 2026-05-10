@@ -43,6 +43,7 @@ dependencies {
     compileOnly("me.clip:placeholderapi:2.11.6")
     compileOnly("org.xerial:sqlite-jdbc:3.42.0.0")
     compileOnly("com.nexomc:nexo:1.20.0")
+    compileOnly("com.github.LoneDev6:api-itemsadder:3.6.1")
     implementation("org.bstats:bstats-bukkit:3.1.0")
     implementation("dev.oakheart:oakheart-core:1.1.1")
 }
