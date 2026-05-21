@@ -37,7 +37,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:1.21.10-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:26.1.2.build.+")
     compileOnly("com.nisovin.shopkeepers:ShopkeepersAPI:2.24.0")
     compileOnly("com.github.retrooper:packetevents-spigot:2.10.0")
     compileOnly("me.clip:placeholderapi:2.11.6")
@@ -45,16 +45,16 @@ dependencies {
     compileOnly("com.nexomc:nexo:1.20.0")
     compileOnly("com.github.LoneDev6:api-itemsadder:3.6.1")
     implementation("org.bstats:bstats-bukkit:3.1.0")
-    implementation("dev.oakheart:oakheart-core:1.1.1")
+    implementation("dev.oakheart:oakheart-core:1.2.0")
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
 
 compileJava {
     options.encoding = 'UTF-8'
-    options.release = 21
+    options.release = 25
     options.compilerArgs += ['-Xlint:deprecation', '-Xlint:unchecked']
 }
 
