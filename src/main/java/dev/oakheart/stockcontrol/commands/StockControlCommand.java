@@ -681,7 +681,7 @@ public class StockControlCommand {
         for (int w = 0; w < workerCount; w++) {
             final int workerIndex = w;
             pool.submit(() -> {
-                java.util.Random rng = new java.util.Random(Thread.currentThread().getId());
+                java.util.Random rng = new java.util.Random(Thread.currentThread().threadId());
                 int virtualStart = workerIndex * virtualsPerWorker;
                 int virtualEnd = Math.min(players, virtualStart + virtualsPerWorker);
                 while (System.nanoTime() < deadlineNs && !Thread.currentThread().isInterrupted()) {
