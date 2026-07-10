@@ -32,6 +32,12 @@ import java.time.ZonedDateTime;
  * Rotation-pool placeholders (use pool name instead of trade key):
  *   %ssc_poolactive_<shop>:<pool>%        - Comma-separated active item keys (e.g., "summer_melon,berry_pie")
  *   %ssc_poolnext_<shop>:<pool>%          - Time until next rotation (e.g., "5h 23m")
+ *
+ * Tag-aggregate placeholders (sum across all shops carrying the tag):
+ *   %ssc_tag_remaining_<tag>%             - Sum of remaining trades for the player across tagged shops
+ *   %ssc_tag_max_<tag>%                   - Sum of effective max trades across tagged shops
+ *   %ssc_tag_used_<tag>%                  - Sum of used trades (max - remaining) across tagged shops
+ *   Unlimited trades are skipped from aggregates (they have no finite max to sum).
  */
 public class StockControlExpansion extends PlaceholderExpansion {
 
@@ -64,6 +70,19 @@ public class StockControlExpansion extends PlaceholderExpansion {
     @Override
     public @Nullable String onRequest(OfflinePlayer player, @NotNull String params) {
         if (player == null) return null;
+
+        // Tag-aggregate placeholders sum across all shops carrying a tag.
+        // Format: %ssc_tag_<action>_<tag>% — handled before the shop:trade parser
+        // because the aggregate form has no colon-separated trade key.
+        if (params.startsWith("tag_remaining_")) {
+            return String.valueOf(aggregateByTag(player, params.substring("tag_remaining_".length()), AggregateMode.REMAINING));
+        }
+        if (params.startsWith("tag_max_")) {
+            return String.valueOf(aggregateByTag(player, params.substring("tag_max_".length()), AggregateMode.MAX));
+        }
+        if (params.startsWith("tag_used_")) {
+            return String.valueOf(aggregateByTag(player, params.substring("tag_used_".length()), AggregateMode.USED));
+        }
 
         // Split into action and identifier: "remaining_shopId:tradeKey" -> ["remaining", "shopId:tradeKey"]
         int firstUnderscore = params.indexOf('_');
@@ -152,6 +171,40 @@ public class StockControlExpansion extends PlaceholderExpansion {
             default:
                 return null;
         }
+    }
+
+    private enum AggregateMode { REMAINING, MAX, USED }
+
+    /**
+     * Sums remaining / max / used trades across every shop tagged with {@code tag},
+     * iterating both static trades and pool items. Unlimited trades are skipped
+     * (they have no finite value to sum). Mirrors per-shop placeholder logic for
+     * shared vs per_player mode so the aggregate is consistent with per-trade
+     * placeholders.
+     */
+    private int aggregateByTag(OfflinePlayer player, String tag, AggregateMode mode) {
+        if (tag == null || tag.isEmpty()) return 0;
+        TradeDataManager tdm = plugin.getTradeDataManager();
+        int sum = 0;
+        for (ShopConfig shop : plugin.getConfigManager().getShopsByTag(tag)) {
+            for (TradeConfig tradeConfig : shop.getAllTrades().values()) {
+                boolean unlimitedEffective = tradeConfig.isUnlimited()
+                        && !(shop.isShared() && tradeConfig.getMaxPerPlayer() > 0);
+                if (unlimitedEffective) continue;
+
+                int effectiveMax = (shop.isShared() && tradeConfig.getMaxPerPlayer() > 0)
+                        ? tradeConfig.getMaxPerPlayer()
+                        : tradeConfig.getMaxTrades();
+                int remaining = tdm.getRemainingTrades(player.getUniqueId(), shop.getShopId(), tradeConfig.getTradeKey());
+
+                switch (mode) {
+                    case REMAINING -> sum += remaining;
+                    case MAX -> sum += effectiveMax;
+                    case USED -> sum += (effectiveMax - remaining);
+                }
+            }
+        }
+        return sum;
     }
 
     private String resolvePoolPlaceholder(ShopConfig shopConfig, String poolName, String action) {

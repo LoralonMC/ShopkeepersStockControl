@@ -3,6 +3,7 @@ package dev.oakheart.stockcontrol.data;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,6 +19,7 @@ public class ShopConfig {
     private final String resetDay;    // Day of week for weekly mode (e.g., "MONDAY")
     private final StockMode stockMode;       // per_player or shared
     private final int maxPerPlayer;          // Default per-player cap for shared mode (0 = no cap)
+    private final List<String> tags;         // Optional tags for grouping shops in aggregate placeholders
     private final Map<String, TradeConfig> trades;  // Key: tradeKey — static trades only
     private final Map<Integer, TradeConfig> tradesBySlot;  // Static trades keyed by UI slot (== source for legacy)
     private final Map<String, PoolConfig> pools;    // Key: pool name (empty if no pools configured)
@@ -45,6 +47,7 @@ public class ShopConfig {
     public ShopConfig(String shopId, String name, boolean enabled,
                       CooldownMode cooldownMode, String resetTime, String resetDay,
                       StockMode stockMode, int maxPerPlayer,
+                      List<String> tags,
                       Map<String, TradeConfig> trades,
                       Map<String, PoolConfig> pools) {
         this.shopId = shopId;
@@ -55,6 +58,7 @@ public class ShopConfig {
         this.resetDay = resetDay;
         this.stockMode = stockMode;
         this.maxPerPlayer = maxPerPlayer;
+        this.tags = tags != null ? List.copyOf(tags) : List.of();
         this.trades = new HashMap<>(trades);
         this.pools = new LinkedHashMap<>(pools);
 
@@ -99,7 +103,7 @@ public class ShopConfig {
                       StockMode stockMode, int maxPerPlayer,
                       Map<String, TradeConfig> trades) {
         this(shopId, name, enabled, cooldownMode, resetTime, resetDay,
-                stockMode, maxPerPlayer, trades, Collections.emptyMap());
+                stockMode, maxPerPlayer, List.of(), trades, Collections.emptyMap());
     }
 
     private static void mergePoolItem(Map<String, TradeConfig> merged, PoolItemConfig item) {
@@ -150,6 +154,32 @@ public class ShopConfig {
 
     public boolean isShared() {
         return stockMode == StockMode.SHARED;
+    }
+
+    /**
+     * Tags applied to this shop. Used by aggregate placeholders (%ssc_tag_*) to group
+     * shops by category (e.g. emerald-source, collectibles).
+     *
+     * @return Unmodifiable list of tag strings (empty if no tags configured)
+     */
+    public List<String> getTags() {
+        return tags;
+    }
+
+    public boolean hasTag(String tag) {
+        if (tag == null) return false;
+        for (String t : tags) {
+            if (t.equalsIgnoreCase(tag)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the unified trade map covering both static trades and pool items.
+     * Aggregate placeholders iterate this map to sum per-player remaining/max/used.
+     */
+    public Map<String, TradeConfig> getAllTrades() {
+        return allTradesByKey;
     }
 
     public Map<String, TradeConfig> getTrades() {
