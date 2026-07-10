@@ -185,15 +185,22 @@ public class ConfigManager {
                 return false;
             }
 
-            // Clean up orphaned shop data (shops that were in old config but not in new)
+            // Shops that were in the old config but not the new one: evict their
+            // cache, but deliberately KEEP their database rows. A temporarily
+            // commented-out shop section or a typo'd UUID during a reload would
+            // otherwise permanently destroy all limit history for that shop with
+            // no confirmation; stale rows are harmless and can be cleaned up
+            // manually if a shop is truly gone for good.
             Set<String> orphanedIds = new HashSet<>(this.shops.keySet());
             orphanedIds.removeAll(newShops.keySet());
             if (!orphanedIds.isEmpty()) {
                 for (String orphanId : orphanedIds) {
                     plugin.getTradeDataManager().evictShop(orphanId);
-                    plugin.getDataStore().deleteShopData(orphanId);
                 }
-                plugin.getLogger().info("Cleaned up " + orphanedIds.size() + " orphaned shop(s): " + orphanedIds);
+                plugin.getLogger().warning("Reload removed " + orphanedIds.size()
+                        + " shop(s) from trades.yml: " + orphanedIds
+                        + ". Their stored trade data was kept; if a shop is gone for good,"
+                        + " delete its rows manually.");
             }
 
             // Atomically swap configurations
@@ -263,6 +270,9 @@ public class ConfigManager {
             StockMode stockMode = StockMode.fromString(tradesNode.getString(shopPath + ".stock-mode", "per_player"));
             int shopMaxPerPlayer = tradesNode.getInt(shopPath + ".max-per-player", 0);
 
+            // Tags — optional list used by aggregate placeholders (%ssc_tag_*) to group shops.
+            List<String> tags = tradesNode.getStringList(shopPath + ".tags");
+
             Map<String, TradeConfig> trades = new HashMap<>();
             String tradesPath = shopPath + ".trades";
             if (tradesNode.isSection(tradesPath)) {
@@ -306,7 +316,7 @@ public class ConfigManager {
                     cooldownMode, resetTime, resetDay, shopMaxPerPlayer);
 
             ShopConfig shopConfig = new ShopConfig(shopId, name, enabled,
-                    cooldownMode, resetTime, resetDay, stockMode, shopMaxPerPlayer, trades, pools);
+                    cooldownMode, resetTime, resetDay, stockMode, shopMaxPerPlayer, tags, trades, pools);
             loadedShops.put(shopId, shopConfig);
         }
 
@@ -777,6 +787,24 @@ public class ConfigManager {
             }
         }
         return null;
+    }
+
+    /**
+     * Returns all shops carrying the given tag. Matched case-insensitively.
+     * Used by the %ssc_tag_* aggregate placeholders.
+     *
+     * @param tag The tag to filter by
+     * @return Collection of matching shops (empty if none)
+     */
+    public Collection<ShopConfig> getShopsByTag(String tag) {
+        if (tag == null || tag.isEmpty()) return Collections.emptyList();
+        List<ShopConfig> matches = new ArrayList<>();
+        for (ShopConfig shop : shops.values()) {
+            if (shop.hasTag(tag)) {
+                matches.add(shop);
+            }
+        }
+        return matches;
     }
 
     public int getPurgeInactiveDays() {

@@ -118,6 +118,7 @@ public class PoolRotationManager {
         // Seed new pools, advance stale ones.
         for (ShopConfig shop : shops.values()) {
             for (PoolConfig pool : shop.getPools().values()) {
+                if (!hasUsableSchedule(pool)) continue;
                 RotationState existing = getState(shop.getShopId(), pool.getName());
                 long expectedPeriod = RotationScheduler.currentPeriodIndex(pool, now);
 
@@ -214,6 +215,18 @@ public class PoolRotationManager {
         );
     }
 
+    /**
+     * An invalid or missing 'every:' parses to a -1 sentinel; startup only LOGS
+     * the validation error and keeps the shop active, so rotation must treat
+     * such pools as frozen — the sentinel otherwise makes every check tick look
+     * like a passed boundary, advancing (and wiping the pool's stock counters)
+     * once per second.
+     */
+    private boolean hasUsableSchedule(PoolConfig pool) {
+        return pool.getSchedule() != dev.oakheart.stockcontrol.data.RotationSchedule.INTERVAL
+                || pool.getIntervalSeconds() > 0;
+    }
+
     private void performCheck() {
         try {
             ZonedDateTime now = ZonedDateTime.now();
@@ -222,6 +235,7 @@ public class PoolRotationManager {
 
             for (ShopConfig shop : shops.values()) {
                 for (PoolConfig pool : shop.getPools().values()) {
+                    if (!hasUsableSchedule(pool)) continue;
                     RotationState state = getState(shop.getShopId(), pool.getName());
                     if (state == null) continue; // seeded lazily by reconcile
                     if (nowEpoch >= state.getAdvancesAt()) {

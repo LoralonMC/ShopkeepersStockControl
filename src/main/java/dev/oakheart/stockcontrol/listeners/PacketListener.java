@@ -97,8 +97,13 @@ public class PacketListener extends PacketListenerAbstract {
             WrapperPlayClientSelectTrade packet = new WrapperPlayClientSelectTrade(event);
             int uiSlot = packet.getSlot();
             if (uiSlot < 0 || uiSlot >= mapping.size()) {
+                // A vanilla client can only select slots we sent it, so an
+                // out-of-range selection is a crafted packet probing for
+                // rotation-hidden offers that still exist server-side. Drop it.
+                event.setCancelled(true);
                 plugin.getLogger().warning("Player " + player.getName() + " selected UI slot "
-                        + uiSlot + " which is outside the rebuilt mapping (size " + mapping.size() + ")");
+                        + uiSlot + " outside the rebuilt mapping (size " + mapping.size()
+                        + ") — packet cancelled");
                 return;
             }
             int sourceSlot = mapping.get(uiSlot);

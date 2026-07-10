@@ -100,6 +100,24 @@ public class ShopkeepersListener implements Listener {
             return;
         }
 
+        // Server-side rotation enforcement. The packet filter only hides rotated-out
+        // pool offers client-side; the recipes still exist in Shopkeepers, and both a
+        // crafted SELECT_TRADE and vanilla's auto-select-by-placed-ingredients can
+        // reach them. Pool items are typically unlimited ("the rotation IS the
+        // limit"), so an inactive item must be refused here or the rotation is
+        // purely cosmetic.
+        String poolName = findPoolContaining(shopConfig, matchedTradeKey);
+        if (poolName != null) {
+            var rotationState = plugin.getPoolRotationManager().getState(shopConfig.getShopId(), poolName);
+            if (rotationState == null || !rotationState.getActiveItems().contains(matchedTradeKey)) {
+                event.setCancelled(true);
+                plugin.getMessageManager().send(player, "trade-not-available");
+                plugin.getLogger().warning("Blocked trade on rotated-out pool item '" + matchedTradeKey
+                        + "' (pool '" + poolName + "', shop " + shopId + ") for " + player.getName());
+                return;
+            }
+        }
+
         // Atomic "reset-if-expired + canTrade + recordTrade" — prevents a compound race
         // where concurrent callers all pass the cap check and all increment past it.
         if (!tradeDataManager.attemptTrade(player.getUniqueId(), shopId, matchedTradeKey)) {
@@ -154,6 +172,55 @@ public class ShopkeepersListener implements Listener {
                     " at " + shopId + ":" + matchedTradeKey +
                     " (remaining: " + remaining + ")");
         }
+    }
+
+    /**
+     * Returns the name of the pool that owns this trade key, or null when the
+     * key belongs to a static trade (or no pool contains it).
+     */
+    private String findPoolContaining(ShopConfig shopConfig, String tradeKey) {
+        if (!shopConfig.hasPools()) {
+            return null;
+        }
+        for (var pool : shopConfig.getPools().values()) {
+            if (pool.getItems().containsKey(tradeKey)) {
+                return pool.getName();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Drops the player -> shop context once the merchant UI is really closed. The
+     * context TTL alone is not enough: getShopContext refreshes the TTL on every
+     * packet, so a context left behind after closing a pooled shop keeps getting
+     * applied to the next merchant UI — including vanilla villagers, whose offers
+     * would be filtered and remapped with the shop's pool config.
+     *
+     * The removal must NOT happen synchronously in this event: Shopkeepers fires
+     * ShopkeeperOpenUIEvent (which registers the context) and then swaps inventory
+     * views, and the close event for the old view arrives after the registration —
+     * removing here strips the pool filtering off the shop UI that is about to
+     * open. So re-check one tick later: only remove if the player has no merchant
+     * view open by then (a same-flow reopen keeps its own, newer context).
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryClose(org.bukkit.event.inventory.InventoryCloseEvent event) {
+        if (!(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+        if (packetManager.getShopContext(player.getUniqueId()) == null) {
+            return;
+        }
+        org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline()) {
+                return; // PlayerQuitListener already cleaned up
+            }
+            if (player.getOpenInventory().getTopInventory().getType()
+                    != org.bukkit.event.inventory.InventoryType.MERCHANT) {
+                packetManager.removeShopMapping(player.getUniqueId());
+            }
+        });
     }
 
     private String findMatchingTradeKey(ShopConfig shopConfig, ShopkeeperTradeEvent event) {

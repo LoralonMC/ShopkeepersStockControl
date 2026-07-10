@@ -903,19 +903,26 @@ public class TradeDataManager {
      * Flushes dirty data asynchronously to avoid blocking the main thread.
      */
     public void evictPlayer(UUID playerId) {
-        // Collect dirty data before removing from cache (must happen on main thread)
+        // Collect dirty data before removing from cache (must happen on main thread).
+        // The collect phase must hold writeResetLock: the async batch flush can
+        // otherwise claim a dirty key (its dirtyKeys.remove wins, ours loses, so we
+        // skip saving) while we remove the cache entry before the flush reads it —
+        // the player's final trade counts are then persisted nowhere and a relog
+        // lets them trade past the limit.
         Set<String> keys = playerCacheKeys.remove(playerId);
         List<PlayerTradeData> dataToFlush = new ArrayList<>();
 
         if (keys != null) {
-            for (String key : keys) {
-                if (dirtyKeys.remove(key)) {
-                    PlayerTradeData data = tradeCache.get(key);
-                    if (data != null) {
-                        dataToFlush.add(data);
+            synchronized (writeResetLock) {
+                for (String key : keys) {
+                    if (dirtyKeys.remove(key)) {
+                        PlayerTradeData data = tradeCache.get(key);
+                        if (data != null) {
+                            dataToFlush.add(data);
+                        }
                     }
+                    tradeCache.remove(key);
                 }
-                tradeCache.remove(key);
             }
         }
 

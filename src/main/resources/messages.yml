@@ -22,6 +22,9 @@
 trade-limit-reached:
   text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#C27B6B>You've reached your limit! <#f2ebd7>Cooldown: <#FCD472><time_remaining> <#f2ebd7>(Resets at <#FCD472><reset_time><#f2ebd7>)"
   display: chat
+trade-not-available:
+  text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#C27B6B>That item isn't in the current rotation."
+  display: chat
 trades-remaining:
   text: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#f2ebd7>Trades remaining: <#FCD472><remaining><#f2ebd7>/<#FCD472><max>"
   display: action_bar
