@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Public rotation API for other plugins. `ShopkeepersStockControl#getRotationApi()` returns a `RotationApi` that resolves a pool's active item keys into the real `ItemStack`s players see in the merchant UI (walking each item's `source` slot into the backing Shopkeepers offer), along with each item's Nexo ID and price. Also exposes the spotlighted subpool and the next rotation timestamp, so consumers no longer reimplement the key-to-item lookup.
+- `PoolRotationEvent`, fired whenever a pool's active-item list changes, carrying a `RotationCause` of `SEED`, `ADVANCE`, `FORCE`, or `REPICK`. Always delivered on the main thread even though the rotation check runs async, so listeners can touch the world directly. Lets consumers mirror rotation without polling.
+
+### Fixed
+
+- Pools whose spotlighted subpool holds fewer items than the pool has UI slots no longer re-pick their active items on every reload. The staleness check compared the active list's size against the pool's `visible` count, so a short-but-correct list (a 3-item subpool in a 6-slot pool, say) looked permanently stale and triggered a spurious re-pick plus a packet re-push to every viewer on each reload. The check now re-runs selection for the stored period and compares the result, which is what it was meant to test.
+
+### Added
+
 - ItemsAdder support for `/ssc bulk add` — the command now resolves item IDs via Nexo or ItemsAdder (whichever is loaded). Items files take an optional `namespace:` field at the top so bare IDs (e.g. `nm_plushie_corgi`) can be qualified for ItemsAdder (`nogs_menagerie:nm_plushie_corgi`); fully qualified IDs (`other_pack:foo`) work unchanged. The same items file format works for both providers — Nexo servers omit the `namespace` field, ItemsAdder servers add it once per file.
 - New optional dependency: ItemsAdder (alongside Nexo; only one is needed).
 

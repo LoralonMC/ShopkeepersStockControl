@@ -1,5 +1,6 @@
 package dev.oakheart.stockcontrol;
 
+import dev.oakheart.stockcontrol.api.RotationApi;
 import dev.oakheart.stockcontrol.commands.StockControlCommand;
 import dev.oakheart.stockcontrol.config.ConfigManager;
 import dev.oakheart.stockcontrol.data.DataStore;
@@ -31,6 +32,7 @@ public final class ShopkeepersStockControl extends JavaPlugin {
     private PacketManager packetManager;
     private CooldownManager cooldownManager;
     private PoolRotationManager poolRotationManager;
+    private RotationApi rotationApi;
 
     @Override
     public void onEnable() {
@@ -102,8 +104,11 @@ public final class ShopkeepersStockControl extends JavaPlugin {
         cooldownManager = new CooldownManager(this, tradeDataManager);
         cooldownManager.initialize();
 
-        // Pool rotation manager
+        // Pool rotation manager. The public API is built first: initialize() can fire
+        // PoolRotationEvent while seeding, and a listener reaching for the API must not
+        // find it half-constructed.
         poolRotationManager = new PoolRotationManager(this, dataStore, tradeDataManager);
+        rotationApi = new RotationApi(this);
         poolRotationManager.initialize();
     }
 
@@ -200,6 +205,16 @@ public final class ShopkeepersStockControl extends JavaPlugin {
 
     public PoolRotationManager getPoolRotationManager() {
         return poolRotationManager;
+    }
+
+    /**
+     * @return The public rotation API for other plugins — resolves a pool's active item keys
+     *         into the real item stacks players see in the merchant UI. Pair it with
+     *         {@link dev.oakheart.stockcontrol.api.event.PoolRotationEvent} to react to changes
+     *         without polling.
+     */
+    public RotationApi getRotationApi() {
+        return rotationApi;
     }
 
 }

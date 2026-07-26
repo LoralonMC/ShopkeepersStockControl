@@ -1,6 +1,8 @@
 package dev.oakheart.stockcontrol.managers;
 
 import dev.oakheart.stockcontrol.ShopkeepersStockControl;
+import dev.oakheart.stockcontrol.api.RotationCause;
+import dev.oakheart.stockcontrol.api.event.PoolRotationEvent;
 import dev.oakheart.stockcontrol.data.DataStore;
 import dev.oakheart.stockcontrol.data.PoolConfig;
 import dev.oakheart.stockcontrol.data.RotationState;
@@ -128,8 +130,8 @@ public class PoolRotationManager {
                     seedInitial(shop.getShopId(), pool, expectedPeriod, now);
                 } else if (existing.getPeriodIndex() < expectedPeriod) {
                     // Boundary passed while we were offline — catch up.
-                    advance(shop.getShopId(), pool, expectedPeriod, now);
-                } else if (isActiveListStale(pool, existing)) {
+                    advance(shop.getShopId(), pool, expectedPeriod, now, RotationCause.ADVANCE);
+                } else if (isActiveListStale(shop.getShopId(), pool, existing)) {
                     // Period hasn't advanced, but the cached active list no longer reflects
                     // what selectActive would pick now — typically because the operator added
                     // items to a previously-empty pool/subpool via /ssc bulk add and reloaded.
@@ -200,7 +202,7 @@ public class PoolRotationManager {
             long basePeriod = existing != null
                     ? existing.getPeriodIndex()
                     : RotationScheduler.currentPeriodIndex(pool, now);
-            advance(shopId, pool, basePeriod + 1, now);
+            advance(shopId, pool, basePeriod + 1, now, RotationCause.FORCE);
             advanced++;
         }
         return advanced;
@@ -240,7 +242,7 @@ public class PoolRotationManager {
                     if (state == null) continue; // seeded lazily by reconcile
                     if (nowEpoch >= state.getAdvancesAt()) {
                         long expectedPeriod = RotationScheduler.currentPeriodIndex(pool, now);
-                        advance(shop.getShopId(), pool, expectedPeriod, now);
+                        advance(shop.getShopId(), pool, expectedPeriod, now, RotationCause.ADVANCE);
                     }
                 }
             }
@@ -251,27 +253,22 @@ public class PoolRotationManager {
 
     /**
      * Returns true when the cached active items don't reflect what {@code selectActive} would
-     * pick now: either the list is empty while the pool has items, the size doesn't match
-     * the pool's {@code visible} count, or any cached item key no longer exists in the pool's
-     * current effective item set (flat items + all subpool items).
+     * pick now — typically because the operator added or removed items via {@code /ssc bulk add}
+     * and reloaded.
+     *
+     * <p>Selection is a pure function of (shopId, poolName, periodIndex, config), so the honest
+     * test is simply to re-run it for the stored period and compare. Deliberately <em>not</em>
+     * a size check against {@code pool.getVisible()}: a subpool holding fewer items than the
+     * pool has slots legitimately produces a short list, and treating that as stale re-picks
+     * (and re-pushes packets to every viewer) on every single reload.</p>
      */
-    private boolean isActiveListStale(PoolConfig pool, RotationState existing) {
-        List<String> active = existing.getActiveItems();
+    private boolean isActiveListStale(String shopId, PoolConfig pool, RotationState existing) {
         boolean poolHasItems = !pool.getItems().isEmpty()
                 || pool.getSubpools().values().stream().anyMatch(s -> !s.getItems().isEmpty());
-
         if (!poolHasItems) return false; // Nothing to pick — leave the empty state alone.
-        if (active.isEmpty()) return true;
-        if (active.size() != pool.getVisible()) return true;
 
-        Set<String> validKeys = new HashSet<>(pool.getItems().keySet());
-        for (var sub : pool.getSubpools().values()) {
-            validKeys.addAll(sub.getItems().keySet());
-        }
-        for (String key : active) {
-            if (!validKeys.contains(key)) return true;
-        }
-        return false;
+        List<String> expected = RotationScheduler.selectActive(shopId, pool, existing.getPeriodIndex());
+        return !expected.equals(existing.getActiveItems());
     }
 
     /**
@@ -287,6 +284,7 @@ public class PoolRotationManager {
                 shopId, pool.getName(), existing.getPeriodIndex(), newActive, advancesAt);
         storeState(refreshed);
         plugin.getPacketManager().scheduleRotationPush(shopId);
+        fireRotationEvent(shopId, pool, refreshed, RotationCause.REPICK);
         plugin.getLogger().info("Pool '" + pool.getName() + "' in shop " + shopId
                 + " re-picked active items at period " + existing.getPeriodIndex()
                 + " (active: " + newActive + ")");
@@ -297,6 +295,7 @@ public class PoolRotationManager {
         long advancesAt = RotationScheduler.advancesAt(pool, periodIndex, now);
         RotationState fresh = new RotationState(shopId, pool.getName(), periodIndex, active, advancesAt);
         storeState(fresh);
+        fireRotationEvent(shopId, pool, fresh, RotationCause.SEED);
 
         if (plugin.getConfigManager().isDebugMode()) {
             plugin.getLogger().info("Seeded pool '" + pool.getName() + "' in shop " + shopId
@@ -304,7 +303,8 @@ public class PoolRotationManager {
         }
     }
 
-    private void advance(String shopId, PoolConfig pool, long newPeriodIndex, ZonedDateTime now) {
+    private void advance(String shopId, PoolConfig pool, long newPeriodIndex, ZonedDateTime now,
+                         RotationCause cause) {
         List<String> newActive = RotationScheduler.selectActive(shopId, pool, newPeriodIndex);
         long advancesAt = RotationScheduler.advancesAt(pool, newPeriodIndex, now);
 
@@ -323,9 +323,35 @@ public class PoolRotationManager {
         // additionally returns any in-progress trade inputs to the viewer's inventory, so a
         // previously-selected (now stale) trade can't complete against the new item.
         plugin.getPacketManager().scheduleRotationPush(shopId);
+        fireRotationEvent(shopId, pool, fresh, cause);
 
         plugin.getLogger().info("Pool '" + pool.getName() + "' in shop " + shopId
                 + " advanced to period " + newPeriodIndex + " (active: " + newActive + ")");
+    }
+
+    /**
+     * Publishes a {@link PoolRotationEvent} for consumers that mirror rotation outside the
+     * merchant UI.
+     *
+     * <p>The scheduled check runs asynchronously, but listeners will typically touch the world,
+     * so the event is always dispatched on the main thread. Skipped entirely while the plugin
+     * is disabled — scheduling during shutdown throws, and nothing is listening by then anyway.</p>
+     */
+    private void fireRotationEvent(String shopId, PoolConfig pool, RotationState state, RotationCause cause) {
+        if (!plugin.isEnabled()) return;
+
+        ShopConfig shop = plugin.getConfigManager().getShop(shopId);
+        String shopName = shop == null ? shopId : shop.getName();
+        PoolRotationEvent event = new PoolRotationEvent(
+                shopId, shopName, pool.getName(),
+                state.getPeriodIndex(), state.getAdvancesAt(),
+                state.getActiveItems(), cause);
+
+        if (Bukkit.isPrimaryThread()) {
+            Bukkit.getPluginManager().callEvent(event);
+        } else {
+            Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getPluginManager().callEvent(event));
+        }
     }
 
     private void storeState(RotationState state) {
