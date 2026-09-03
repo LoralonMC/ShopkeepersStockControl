@@ -40,6 +40,10 @@ purge-inactive-days: 0
 #   %ssc_max_<shop>:<trade>%              - Effective max (per-player cap for shared, otherwise max-trades)
 #   %ssc_cooldown_<shop>:<trade>%         - Time until reset, "Ready", or "Available"/"Sold out" (none mode)
 #   %ssc_resettime_<shop>:<trade>%        - Reset time (e.g. "00:00", "Monday 00:00", "Never")
+#   %ssc_resetnext_<shop>:<trade>%        - Time until the next scheduled reset (e.g. "5h 23m")
+#                                           Shop-wide, so it reads the same for every player and keeps
+#                                           counting for someone who has not traded yet. Use this on
+#                                           holograms and scoreboards; cooldown_ is the per-player timer.
 #   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g. "100")
 #   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g. "73")
 #

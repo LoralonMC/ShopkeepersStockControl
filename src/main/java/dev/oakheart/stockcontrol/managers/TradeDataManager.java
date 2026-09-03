@@ -463,6 +463,29 @@ public class TradeDataManager {
     }
 
     /**
+     * Seconds until this trade's next scheduled reset, independent of any player's usage.
+     *
+     * <p>DAILY and WEEKLY trades reset on a wall-clock boundary that every player shares,
+     * so the answer is identical for every viewer. That is what makes this usable on a
+     * hologram or scoreboard, where {@link #getTimeUntilReset(UUID, String, String)} would
+     * read differently per viewer and show nothing at all to a player who has not traded yet.
+     *
+     * <p>ROLLING cooldowns start from each player's own first trade and have no shared
+     * schedule, and NONE never resets; both return -1 so callers can decide how to render.
+     *
+     * @return seconds until the next scheduled reset, or -1 if the trade has no shared schedule
+     */
+    public long getSecondsUntilScheduledReset(String shopId, String tradeKey) {
+        TradeConfig tradeConfig = getTradeConfig(shopId, tradeKey);
+        if (tradeConfig == null) return -1;
+
+        CooldownMode mode = tradeConfig.getCooldownMode();
+        if (mode != CooldownMode.DAILY && mode != CooldownMode.WEEKLY) return -1;
+
+        return Math.max(0, getNextResetTime(tradeConfig) - ZonedDateTime.now().toEpochSecond());
+    }
+
+    /**
      * Formats a duration in seconds to a human-readable string.
      */
     public String formatDuration(long seconds) {

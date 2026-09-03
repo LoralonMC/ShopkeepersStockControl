@@ -108,5 +108,6 @@ The `<shop>` can be a shop UUID or display name (case-insensitive).
 | `%ssc_max_<shop>:<trade>%` | Effective max (per-player cap for shared, otherwise max-trades) | `4` |
 | `%ssc_cooldown_<shop>:<trade>%` | Time until reset, "Ready", or "Available"/"Sold out" | `23h 45m` |
 | `%ssc_resettime_<shop>:<trade>%` | Reset time display | `00:00` |
+| `%ssc_resetnext_<shop>:<trade>%` | Time until the next scheduled reset, shop-wide | `5h 23m` |
 | `%ssc_globalmax_<shop>:<trade>%` | Total global stock (shared shops) | `100` |
 | `%ssc_globalremaining_<shop>:<trade>%` | Remaining global stock (shared shops) | `73` |

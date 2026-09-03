@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `%ssc_resetnext_<shop>:<trade>%` placeholder: time until a trade's next scheduled reset. Unlike `%ssc_cooldown_%`, which is the viewer's own timer and reads "Ready" for anyone who has not spent the trade yet, this follows the shop's shared DAILY/WEEKLY wall-clock boundary, so it renders identically for every player and is usable on holograms and scoreboards. ROLLING trades have no shared schedule and fall back to the viewer's own cooldown; NONE returns "Never". Backed by the new `TradeDataManager#getSecondsUntilScheduledReset`.
+
 - Public rotation API for other plugins. `ShopkeepersStockControl#getRotationApi()` returns a `RotationApi` that resolves a pool's active item keys into the real `ItemStack`s players see in the merchant UI (walking each item's `source` slot into the backing Shopkeepers offer), along with each item's Nexo ID and price. Also exposes the spotlighted subpool and the next rotation timestamp, so consumers no longer reimplement the key-to-item lookup.
 - `PoolRotationEvent`, fired whenever a pool's active-item list changes, carrying a `RotationCause` of `SEED`, `ADVANCE`, `FORCE`, or `REPICK`. Always delivered on the main thread even though the rotation check runs async, so listeners can touch the world directly. Lets consumers mirror rotation without polling.
 

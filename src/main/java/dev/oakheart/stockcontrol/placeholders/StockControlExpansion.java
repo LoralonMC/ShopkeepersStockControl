@@ -26,6 +26,7 @@ import java.time.ZonedDateTime;
  *   %ssc_max_<shop>:<trade>%              - Effective max trades (per-player cap for shared, otherwise max_trades)
  *   %ssc_cooldown_<shop>:<trade>%         - Formatted cooldown, "Ready", or "Sold out" (NONE mode)
  *   %ssc_resettime_<shop>:<trade>%        - Reset time display (e.g., "00:00", "Monday 00:00", "Never")
+ *   %ssc_resetnext_<shop>:<trade>%        - Time until the next scheduled reset, same for every viewer (e.g., "5h 23m")
  *   %ssc_globalmax_<shop>:<trade>%        - Total global stock for shared shops (e.g., "100")
  *   %ssc_globalremaining_<shop>:<trade>%  - Remaining global stock for shared shops (e.g., "73")
  *
@@ -159,6 +160,21 @@ public class StockControlExpansion extends PlaceholderExpansion {
 
             case "resettime":
                 return tdm.getResetTimeString(shopId, tradeKey);
+
+            case "resetnext": {
+                // Unlike `cooldown`, this is the shop's shared schedule rather than this
+                // player's own timer, so it reads the same for everyone and still counts
+                // down for a player who has not traded yet. That is what a hologram or
+                // scoreboard wants; `cooldown` would show them "Ready" instead.
+                if (tradeConfig.getCooldownMode() == CooldownMode.NONE) return "Never";
+
+                long scheduled = tdm.getSecondsUntilScheduledReset(shopId, tradeKey);
+                if (scheduled >= 0) return tdm.formatDuration(scheduled);
+
+                // ROLLING has no shared schedule — fall back to this player's own cooldown.
+                if (tdm.hasCooldownExpired(player.getUniqueId(), shopId, tradeKey)) return "Ready";
+                return tdm.formatDuration(tdm.getTimeUntilReset(player.getUniqueId(), shopId, tradeKey));
+            }
 
             case "globalmax":
                 return tradeConfig.isUnlimited() ? "∞" : String.valueOf(tradeConfig.getMaxTrades());
