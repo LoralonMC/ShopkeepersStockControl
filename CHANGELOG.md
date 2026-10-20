@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-20
+
 ### Added
 
 - `%ssc_resetnext_<shop>:<trade>%` placeholder: time until a trade's next scheduled reset. Unlike `%ssc_cooldown_%`, which is the viewer's own timer and reads "Ready" for anyone who has not spent the trade yet, this follows the shop's shared DAILY/WEEKLY wall-clock boundary, so it renders identically for every player and is usable on holograms and scoreboards. ROLLING trades have no shared schedule and fall back to the viewer's own cooldown; NONE returns "Never". Backed by the new `TradeDataManager#getSecondsUntilScheduledReset`.
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Targets Paper 26.3 (`api-version: '26.3'`, built against paper-api 26.3). This build no longer loads on 26.1.2.
 - Bootstrap-friendly validation — pools with zero items (or subpools with zero items) now load successfully so the operator can declare pool/subpool structure in `trades.yml` *before* running `/ssc bulk add`. Previously empty pools were rejected, which created a chicken-and-egg setup problem. Pools with at least one item still enforce the "items >= visible" rule.
 - `/ssc bulk add` now falls back to the pool's default `price` when the named subpool isn't declared in `trades.yml` yet (the common bootstrap case). The output snippet is also now wrapped in a complete subpool YAML block (with the right indentation) so the operator can paste it directly under `pools.<pool>.subpools:`.
 - `/ssc bulk add` now writes the new subpool entries (item keys + source slots + max-trades) **directly into `trades.yml`** via the OakheartLib config wrapper (which preserves comments and formatting). Replaces the earlier "paste a snippet" workflow — the operator just runs the command and then `/ssc reload`. If a subpool's `visible` is already set, it's left alone so hand-tuned values aren't clobbered.
