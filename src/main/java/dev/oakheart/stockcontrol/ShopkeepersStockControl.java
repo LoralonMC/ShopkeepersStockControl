@@ -138,6 +138,9 @@ public final class ShopkeepersStockControl extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(
                 new PlayerQuitListener(tradeDataManager, packetManager), this);
+
+        getServer().getPluginManager().registerEvents(
+                new dev.oakheart.stockcontrol.listeners.ConfigErrorNotifier(this), this);
     }
 
     private void registerCommands() {

@@ -52,6 +52,8 @@ commands:
   reload-start: "<#D89B6A>Reloading configuration..."
   reload-success: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#8FAA87>Configuration reloaded successfully!"
   reload-failed: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#C27B6B>Failed to reload configuration. Check console for errors."
+  # Sent to staff (shopkeepersstock.reload) on join while the running trades.yml has errors.
+  config-errors-on-join: "<#6C757D>[<#C27B6B>ᴇʀʀᴏʀ<#6C757D>] <#f2ebd7>trades.yml has <#C27B6B><count> error(s)<#f2ebd7>. Shops are running on it as loaded. See the console, fix it, then <#FCD472>/ssc reload<#f2ebd7>."
   # --- Debug ---
   debug-enabled: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#f2ebd7>Debug mode <#8FAA87>enabled"
   debug-disabled: "<#6C757D>[<#6B7A5E>ꜱʜᴏᴘ<#6C757D>] <#f2ebd7>Debug mode <#D89B6A>disabled"

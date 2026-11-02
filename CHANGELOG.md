@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-02
+
+### Changed
+- A trades.yml with validation errors at startup was only reported in the console. The plugin still runs on it as loaded, so every shop keeps its limits (refusing it would leave shops unlimited), but staff with `shopkeepersstock.reload` are now told on join, with the error count, until the file is fixed and reloaded. New message `commands.config-errors-on-join`.
+
 ## [1.5.0] - 2026-10-20
 
 ### Added

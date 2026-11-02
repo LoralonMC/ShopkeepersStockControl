@@ -207,6 +207,7 @@ public class ConfigManager {
             this.tradesConfig = newTradesConfig;
             this.shops = Collections.unmodifiableMap(newShops);
             cacheValues();
+            configErrorCount = 0;
 
             plugin.getLogger().info("Configuration reloaded successfully");
             return true;
@@ -220,6 +221,18 @@ public class ConfigManager {
     /**
      * Loads shop configurations from trades.yml.
      */
+    /**
+     * Errors in the trades.yml the plugin started on (0 once a reload succeeds). Startup keeps the
+     * shops as loaded rather than refusing them: disabling the plugin, or dropping the shops with
+     * errors, would leave those shops with no limits at all. Staff are told on join instead (see
+     * ConfigErrorNotifier) until the file is fixed and reloaded.
+     */
+    private volatile int configErrorCount;
+
+    public int getConfigErrorCount() {
+        return configErrorCount;
+    }
+
     private void loadShops() {
         shops = Collections.unmodifiableMap(loadShopsFromConfig(tradesConfig));
 
@@ -232,10 +245,12 @@ public class ConfigManager {
 
         // Validate shop configurations
         Set<String> errors = validateShops(shops);
+        configErrorCount = errors.size();
         if (!errors.isEmpty()) {
             plugin.getLogger().severe("=== Configuration Errors (trades.yml) ===");
             errors.forEach(error -> plugin.getLogger().severe("  - " + error));
-            plugin.getLogger().severe("Fix these errors in trades.yml!");
+            plugin.getLogger().severe("Running on trades.yml as loaded so every shop keeps its limits. "
+                    + "Fix these errors, then /ssc reload (staff are reminded on join until then).");
         }
     }
 
